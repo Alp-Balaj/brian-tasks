@@ -9,8 +9,12 @@ import {
   type TaskStatus,
 } from '../../domain/task'
 import { useTasks } from '../../store/tasks'
+import { useSpaces } from '../../store/spaces'
+import { useSpaceSelection } from '../../store/ui'
 import { useVisibleTasks } from '../../store/selectors'
+import { ALL_SPACES } from '../../domain/space'
 import { useShell } from '../../components/useShell'
+import { SpaceDot } from '../../components/TaskCard'
 
 type SortKey = 'priority' | 'due' | 'created' | 'title'
 
@@ -26,6 +30,10 @@ export function ListView() {
   const tasks = useVisibleTasks()
   const update = useTasks((s) => s.update)
   const { openTask } = useShell()
+  // Q30: the space dot is only shown when the list mixes spaces.
+  const showSpace = useSpaceSelection((s) => s.selected === ALL_SPACES)
+  const spaces = useSpaces((s) => s.spaces)
+  const spaceById = useMemo(() => new Map(spaces.map((s) => [s.id, s])), [spaces])
 
   const [status, setStatus] = useState<TaskStatus | 'all' | 'active'>('active')
   const [query, setQuery] = useState('')
@@ -75,27 +83,39 @@ export function ListView() {
 
       <ul className="divide-y divide-neutral-200 rounded-lg border border-neutral-200 bg-white">
         {visible.length === 0 && <li className="p-6 text-center text-sm text-neutral-400">Nothing here.</li>}
-        {visible.map((t) => (
-          <li key={t.id} className="flex items-center gap-3 px-3 py-2 hover:bg-neutral-50">
-            <input
-              type="checkbox"
-              checked={t.status === 'done'}
-              onChange={(e) => update(t.id, { status: e.target.checked ? 'done' : 'todo' })}
-              className="h-4 w-4 shrink-0"
-            />
-            <button onClick={() => openTask(t.id)} className="min-w-0 flex-1 text-left">
-              <div className={`truncate text-sm ${t.status === 'done' ? 'text-neutral-400 line-through' : ''}`}>
-                {t.title}
-              </div>
-              <div className="flex gap-2 text-xs text-neutral-500">
-                <span>{STATUS_LABEL[t.status]}</span>
-                {t.priority !== 'normal' && <span>· {PRIORITY_LABEL[t.priority]}</span>}
-                {t.due && <span>· due {t.due}</span>}
-                {t.tags.length > 0 && <span>· {t.tags.join(', ')}</span>}
-              </div>
-            </button>
-          </li>
-        ))}
+        {visible.map((t) => {
+          const space = showSpace ? spaceById.get(t.spaceId) : undefined
+          return (
+            <li key={t.id} className="flex items-center gap-3 px-3 py-2 hover:bg-neutral-50">
+              <input
+                type="checkbox"
+                checked={t.status === 'done'}
+                onChange={(e) => update(t.id, { status: e.target.checked ? 'done' : 'todo' })}
+                className="h-4 w-4 shrink-0"
+              />
+              <button onClick={() => openTask(t.id)} className="min-w-0 flex-1 text-left">
+                <div className={`truncate text-sm ${t.status === 'done' ? 'text-neutral-400 line-through' : ''}`}>
+                  {t.title}
+                </div>
+                <div className="flex items-center gap-2 text-xs text-neutral-500">
+                  {space && (
+                    <span className="inline-flex items-center gap-1">
+                      <SpaceDot colour={space.colour} />
+                      {space.name}
+                    </span>
+                  )}
+                  <span>
+                    {space && '· '}
+                    {STATUS_LABEL[t.status]}
+                  </span>
+                  {t.priority !== 'normal' && <span>· {PRIORITY_LABEL[t.priority]}</span>}
+                  {t.due && <span>· due {t.due}</span>}
+                  {t.tags.length > 0 && <span>· {t.tags.join(', ')}</span>}
+                </div>
+              </button>
+            </li>
+          )
+        })}
       </ul>
       <div className="text-right text-xs text-neutral-400">{visible.length} tasks</div>
       <div className="text-right text-xs">
