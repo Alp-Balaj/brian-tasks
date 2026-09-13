@@ -25,6 +25,12 @@ export interface Task {
   scheduled?: ISODate
   /** Manual ordering inside a kanban column (lower = higher up). */
   order: number
+  /** The one Space this task lives in. Always set; DEFAULT_SPACE_ID after migration. */
+  spaceId: string
+  /** Deliberately put out of sight. Hidden from every view except Archive, regardless of status. */
+  archived: boolean
+  /** Hand-picked to appear on Home. Cleared when the task becomes done. */
+  pinned: boolean
   createdAt: ISODateTime
   updatedAt: ISODateTime
   completedAt?: ISODateTime

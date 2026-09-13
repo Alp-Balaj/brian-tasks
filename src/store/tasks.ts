@@ -1,43 +1,33 @@
 import { create } from 'zustand'
 import { nanoid } from 'nanoid'
 import type { NewTask, Task, TaskPatch, TaskStatus } from '../domain/task'
-import { localStorageRepository, type TaskRepository } from './repository'
+import { DEFAULT_SPACE_ID } from '../domain/space'
 
 interface TaskState {
   tasks: Task[]
-  hydrated: boolean
-  hydrate: () => Promise<void>
   add: (input: NewTask) => Task
+  /** Becoming `done` also unpins (Q25). */
   update: (id: string, patch: TaskPatch) => void
+  /** Permanent delete. Only the Archive page offers it (Q28). */
   remove: (id: string) => void
   /** Move a task to a status column and position it at `index` among its new siblings. */
   move: (id: string, status: TaskStatus, index: number) => void
+  archive: (id: string) => void
+  restore: (id: string) => void
+  togglePin: (id: string) => void
   replaceAll: (tasks: Task[]) => void
 }
 
-const repo: TaskRepository = localStorageRepository
-
 const now = () => new Date().toISOString()
 
+// Persistence is not wired here: store/persist.ts subscribes to this store and
+// saves the combined snapshot after every change.
 export const useTasks = create<TaskState>((set, get) => {
-  // Persist after every mutation. Cheap enough at this scale; debounce if it ever isn't.
-  const commit = (tasks: Task[]) => {
-    set({ tasks })
-    void repo.saveAll(tasks)
-  }
+  const patchOne = (id: string, fn: (t: Task) => Task) =>
+    set({ tasks: get().tasks.map((t) => (t.id === id ? fn(t) : t)) })
 
   return {
     tasks: [],
-    hydrated: false,
-
-    hydrate: async () => {
-      let tasks = await repo.loadAll()
-      if (tasks.length === 0) {
-        tasks = await loadSeed()
-        if (tasks.length > 0) await repo.saveAll(tasks)
-      }
-      set({ tasks, hydrated: true })
-    },
 
     add: (input) => {
       const ts = now()
@@ -53,29 +43,30 @@ export const useTasks = create<TaskState>((set, get) => {
         due: input.due,
         scheduled: input.scheduled,
         order: input.order ?? Math.min(0, ...siblings.map((t) => t.order)) - 1,
+        spaceId: input.spaceId ?? DEFAULT_SPACE_ID,
+        archived: input.archived ?? false,
+        pinned: status === 'done' ? false : (input.pinned ?? false),
         createdAt: ts,
         updatedAt: ts,
         completedAt: status === 'done' ? ts : undefined,
       }
-      commit([task, ...get().tasks])
+      set({ tasks: [task, ...get().tasks] })
       return task
     },
 
     update: (id, patch) => {
-      commit(
-        get().tasks.map((t) => {
-          if (t.id !== id) return t
-          const next: Task = { ...t, ...patch, updatedAt: now() }
-          if (patch.status && patch.status !== t.status) {
-            next.completedAt = patch.status === 'done' ? now() : undefined
-          }
-          return next
-        }),
-      )
+      patchOne(id, (t) => {
+        const next: Task = { ...t, ...patch, updatedAt: now() }
+        if (patch.status && patch.status !== t.status) {
+          next.completedAt = patch.status === 'done' ? now() : undefined
+        }
+        if (next.status === 'done') next.pinned = false
+        return next
+      })
     },
 
     remove: (id) => {
-      commit(get().tasks.filter((t) => t.id !== id))
+      set({ tasks: get().tasks.filter((t) => t.id !== id) })
     },
 
     move: (id, status, index) => {
@@ -88,39 +79,33 @@ export const useTasks = create<TaskState>((set, get) => {
       column.splice(Math.max(0, Math.min(index, column.length)), 0, { ...moving, status })
       const reordered = new Map(column.map((t, i) => [t.id, i]))
       const ts = now()
-      commit(
-        tasks.map((t) => {
+      set({
+        tasks: tasks.map((t) => {
           const order = reordered.get(t.id)
           if (order === undefined) return t
           if (t.id === id) {
+            const done = status === 'done'
             return {
               ...t,
               status,
               order,
               updatedAt: ts,
-              completedAt: status === 'done' ? (t.completedAt ?? ts) : undefined,
+              completedAt: done ? (t.completedAt ?? ts) : undefined,
+              pinned: done ? false : t.pinned,
             }
           }
           return t.order === order ? t : { ...t, order }
         }),
-      )
+      })
     },
 
-    replaceAll: (tasks) => commit(tasks),
+    archive: (id) => patchOne(id, (t) => ({ ...t, archived: true, updatedAt: now() })),
+    restore: (id) => patchOne(id, (t) => ({ ...t, archived: false, updatedAt: now() })),
+    togglePin: (id) => patchOne(id, (t) => ({ ...t, pinned: !t.pinned, updatedAt: now() })),
+
+    replaceAll: (tasks) => set({ tasks }),
   }
 })
-
-/** First-run seed: `public/seed.json`, produced by `scripts/import-obsidian.mjs`. Optional. */
-async function loadSeed(): Promise<Task[]> {
-  try {
-    const res = await fetch(`${import.meta.env.BASE_URL}seed.json`)
-    if (!res.ok) return []
-    const data: unknown = await res.json()
-    return Array.isArray(data) ? (data as Task[]) : []
-  } catch {
-    return []
-  }
-}
 
 // ---- Selectors (pure, so they can be unit-tested and reused across views) ----
 

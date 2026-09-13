@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { format, isSameMonth, isToday, startOfMonth } from 'date-fns'
-import { onDate, useTasks } from '../../store/tasks'
+import { onDate } from '../../store/tasks'
+import { useVisibleTasks } from '../../store/selectors'
 import { monthGrid, shiftMonth, toISODate } from '../../lib/dates'
 import { TaskCard } from '../../components/TaskCard'
 import { QuickAdd } from '../../components/QuickAdd'
@@ -13,7 +14,7 @@ const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
  * Desktop: full grid with cards inside cells. Mobile: grid with dots + a day agenda below.
  */
 export function CalendarView() {
-  const tasks = useTasks((s) => s.tasks)
+  const tasks = useVisibleTasks()
   const { openTask } = useShell()
   const [month, setMonth] = useState(() => startOfMonth(new Date()))
   const [selected, setSelected] = useState<string>(toISODate(new Date()))

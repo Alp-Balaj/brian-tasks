@@ -1,4 +1,5 @@
 import { useTasks } from '../store/tasks'
+import { useSpaces } from '../store/spaces'
 import { Sheet } from './Sheet'
 import {
   PRIORITY_LABEL,
@@ -20,7 +21,9 @@ const field = 'w-full rounded-md border border-neutral-300 px-3 py-2 text-sm out
 export function TaskEditor({ taskId, onClose }: Props) {
   const task = useTasks((s) => s.tasks.find((t) => t.id === taskId))
   const update = useTasks((s) => s.update)
-  const remove = useTasks((s) => s.remove)
+  const archive = useTasks((s) => s.archive)
+  const togglePin = useTasks((s) => s.togglePin)
+  const spaces = useSpaces((s) => s.spaces)
 
   if (!task) return null
   const set = (patch: Parameters<typeof update>[1]) => update(task.id, patch)
@@ -83,6 +86,29 @@ export function TaskEditor({ taskId, onClose }: Props) {
           </label>
         </div>
 
+        <div className="grid grid-cols-2 gap-3">
+          <label className="flex flex-col gap-1 text-xs text-neutral-500">
+            Space
+            <select value={task.spaceId} onChange={(e) => set({ spaceId: e.target.value })} className={field}>
+              {spaces.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex items-center gap-2 self-end pb-2 text-sm">
+            <input
+              type="checkbox"
+              checked={task.pinned}
+              disabled={task.status === 'done'}
+              onChange={() => togglePin(task.id)}
+              className="h-4 w-4"
+            />
+            Pinned to Home
+          </label>
+        </div>
+
         <label className="flex flex-col gap-1 text-xs text-neutral-500">
           Tags (comma separated)
           <input
@@ -106,16 +132,15 @@ export function TaskEditor({ taskId, onClose }: Props) {
 
         <div className="mt-2 flex items-center justify-between text-xs text-neutral-400">
           <span>Created {task.createdAt.slice(0, 10)}</span>
+          {/* Permanent delete lives only on the Archive page (Q28). */}
           <button
             onClick={() => {
-              if (confirm('Delete this task?')) {
-                remove(task.id)
-                onClose()
-              }
+              archive(task.id)
+              onClose()
             }}
-            className="rounded-md px-2 py-1 text-red-600 hover:bg-red-50"
+            className="rounded-md px-2 py-1 text-neutral-600 hover:bg-neutral-100"
           >
-            Delete
+            Archive
           </button>
         </div>
       </div>

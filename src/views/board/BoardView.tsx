@@ -15,6 +15,7 @@ import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-
 import { CSS } from '@dnd-kit/utilities'
 import { STATUS_LABEL, TASK_STATUSES, isTaskStatus, type Task, type TaskStatus } from '../../domain/task'
 import { byColumn, useTasks } from '../../store/tasks'
+import { useVisibleTasks } from '../../store/selectors'
 import { TaskCard } from '../../components/TaskCard'
 import { QuickAdd } from '../../components/QuickAdd'
 import { useShell } from '../../components/useShell'
@@ -24,7 +25,7 @@ import { useShell } from '../../components/useShell'
  * Horizontal scroll on mobile (columns snap), all columns visible on desktop.
  */
 export function BoardView() {
-  const tasks = useTasks((s) => s.tasks)
+  const tasks = useVisibleTasks()
   const move = useTasks((s) => s.move)
   const { openTask } = useShell()
   const [activeId, setActiveId] = useState<string | null>(null)

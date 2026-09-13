@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import {
   PRIORITY_LABEL,
   PRIORITY_RANK,
@@ -8,6 +9,7 @@ import {
   type TaskStatus,
 } from '../../domain/task'
 import { useTasks } from '../../store/tasks'
+import { useVisibleTasks } from '../../store/selectors'
 import { useShell } from '../../components/useShell'
 
 type SortKey = 'priority' | 'due' | 'created' | 'title'
@@ -21,7 +23,7 @@ const SORTERS: Record<SortKey, (a: Task, b: Task) => number> = {
 
 /** Flat list with status filter, text search and sort. Checkbox toggles done. */
 export function ListView() {
-  const tasks = useTasks((s) => s.tasks)
+  const tasks = useVisibleTasks()
   const update = useTasks((s) => s.update)
   const { openTask } = useShell()
 
@@ -96,6 +98,11 @@ export function ListView() {
         ))}
       </ul>
       <div className="text-right text-xs text-neutral-400">{visible.length} tasks</div>
+      <div className="text-right text-xs">
+        <Link to="/archive" className="text-neutral-400 hover:text-neutral-900">
+          Archive
+        </Link>
+      </div>
     </div>
   )
 }
