@@ -1,0 +1,170 @@
+import { useState } from 'react'
+import { useRoutines } from '../store/routines'
+import { Sheet } from './Sheet'
+import {
+  WEEKDAYS_MONDAY_FIRST,
+  WEEKDAY_SHORT,
+  type NewRoutine,
+  type Routine,
+  type RoutinePatch,
+  type Schedule,
+  type Weekday,
+} from '../domain/routine'
+
+interface Props {
+  /** `null` creates a new Routine; the form is a local draft until "Add". */
+  routineId: string | null
+  onClose: () => void
+}
+
+const field = 'w-full rounded-md border border-neutral-300 px-3 py-2 text-sm outline-none focus:border-neutral-900'
+
+const EMPTY_DRAFT: NewRoutine = { title: '', schedule: { kind: 'daily' }, note: '' }
+
+/**
+ * Edit form for one Routine. Existing routines save every change immediately, like
+ * TaskEditor; a new one is a draft with an Add button, like QuickAdd.
+ */
+export function RoutineEditor({ routineId, onClose }: Props) {
+  const routine = useRoutines((s) => (routineId ? s.routines.find((r) => r.id === routineId) : undefined))
+  const add = useRoutines((s) => s.add)
+  const update = useRoutines((s) => s.update)
+  const archive = useRoutines((s) => s.archive)
+  const [draft, setDraft] = useState<NewRoutine>(EMPTY_DRAFT)
+
+  const isNew = routineId === null
+  if (!isNew && !routine) return null
+
+  const value: Pick<Routine, 'title' | 'schedule' | 'note'> = isNew
+    ? { title: draft.title, schedule: draft.schedule ?? { kind: 'daily' }, note: draft.note ?? '' }
+    : routine!
+  const set = (patch: RoutinePatch) =>
+    isNew ? setDraft((d) => ({ ...d, ...patch })) : update(routineId, patch)
+
+  const submit = () => {
+    if (!draft.title.trim()) return
+    add(draft)
+    onClose()
+  }
+
+  return (
+    <Sheet onClose={onClose}>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault()
+          if (isNew) submit()
+        }}
+        className="flex flex-col gap-4"
+      >
+        {isNew && <label className="text-sm font-medium">New routine</label>}
+        <input
+          autoFocus={isNew}
+          value={value.title}
+          onChange={(e) => set({ title: e.target.value })}
+          placeholder="Read 20 pages"
+          className={isNew ? `${field} text-base` : 'text-lg font-semibold outline-none'}
+        />
+
+        <ScheduleField value={value.schedule} onChange={(schedule) => set({ schedule })} />
+
+        <label className="flex flex-col gap-1 text-xs text-neutral-500">
+          Note
+          <input
+            value={value.note}
+            onChange={(e) => set({ note: e.target.value })}
+            placeholder="currently: Peak"
+            className={field}
+          />
+        </label>
+
+        {isNew ? (
+          <div className="flex justify-end gap-2">
+            <button type="button" onClick={onClose} className="rounded-md px-3 py-2 text-sm hover:bg-neutral-100">
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={!draft.title.trim()}
+              className="rounded-md bg-neutral-900 px-3 py-2 text-sm text-white disabled:opacity-40"
+            >
+              Add
+            </button>
+          </div>
+        ) : (
+          <div className="mt-2 flex items-center justify-between text-xs text-neutral-400">
+            <span>
+              {routine!.checkIns.length} check-in{routine!.checkIns.length === 1 ? '' : 's'} · since{' '}
+              {routine!.createdAt.slice(0, 10)}
+            </span>
+            {/* Permanent delete lives only on the Archive page (Q28). */}
+            <button
+              type="button"
+              onClick={() => {
+                archive(routineId)
+                onClose()
+              }}
+              className="rounded-md px-2 py-1 text-neutral-600 hover:bg-neutral-100"
+            >
+              Archive
+            </button>
+          </div>
+        )}
+      </form>
+    </Sheet>
+  )
+}
+
+/** Starting set when switching from "Every day" to chosen weekdays. */
+const WORKDAYS: Weekday[] = [1, 2, 3, 4, 5]
+
+function ScheduleField({ value, onChange }: { value: Schedule; onChange: (s: Schedule) => void }) {
+  const daily = value.kind === 'daily'
+  const days = value.kind === 'weekdays' ? value.days : []
+
+  const toggleDay = (d: Weekday) => {
+    const next = days.includes(d) ? days.filter((x) => x !== d) : [...days, d]
+    onChange({ kind: 'weekdays', days: WEEKDAYS_MONDAY_FIRST.filter((x) => next.includes(x)) })
+  }
+
+  const segment = (active: boolean) =>
+    `flex-1 rounded-md px-3 py-1.5 text-sm ${active ? 'bg-neutral-900 text-white' : 'hover:bg-neutral-100'}`
+
+  return (
+    <div className="flex flex-col gap-2 text-xs text-neutral-500">
+      Schedule
+      <div className="flex gap-1 rounded-md border border-neutral-300 p-1">
+        <button type="button" onClick={() => onChange({ kind: 'daily' })} className={segment(daily)}>
+          Every day
+        </button>
+        <button
+          type="button"
+          onClick={() => daily && onChange({ kind: 'weekdays', days: WORKDAYS })}
+          className={segment(!daily)}
+        >
+          Chosen days
+        </button>
+      </div>
+      {!daily && (
+        <div className="flex gap-1">
+          {WEEKDAYS_MONDAY_FIRST.map((d) => {
+            const on = days.includes(d)
+            return (
+              <button
+                key={d}
+                type="button"
+                onClick={() => toggleDay(d)}
+                aria-pressed={on}
+                className={`flex-1 rounded-md border py-1.5 text-xs ${
+                  on ? 'border-neutral-900 bg-neutral-900 text-white' : 'border-neutral-300 text-neutral-600 hover:bg-neutral-100'
+                }`}
+              >
+                {WEEKDAY_SHORT[d]}
+              </button>
+            )
+          })}
+        </div>
+      )}
+      {!daily && days.length === 0 && <span className="text-neutral-400">Never scheduled — pick at least one day.</span>}
+    </div>
+  )
+}
