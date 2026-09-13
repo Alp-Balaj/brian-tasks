@@ -42,8 +42,8 @@ export function HomeView() {
 
   const { pinned, today: todayRows, inProgress } = useMemo(() => homeSections(tasks, today), [tasks, today])
 
-  // S5: RoutinesSection decides its own visibility; we can only approximate "empty"
-  // as "no live routines" (it still renders "+ routine" whenever any exist).
+  // RoutinesSection always renders its "+ routine" affordance (see the note there), so
+  // "empty" here means no live Routines rather than nothing rendered above.
   const hasRoutines = useRoutines((s) => s.routines.some((r) => !r.archived))
   const empty = !hasRoutines && pinned.length === 0 && todayRows.length === 0 && inProgress.length === 0
 

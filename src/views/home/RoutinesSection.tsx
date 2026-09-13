@@ -29,10 +29,10 @@ export function RoutinesSection() {
   const active = routines.filter((r) => !r.archived)
   const scheduled = active.filter((r) => isScheduledOn(r.schedule, todayDate))
 
-  // Q10 says to hide the section entirely when there are no routines at all, but then the
-  // first routine could never be created (Home is the only place that creates them). The
-  // "+ routine" affordance therefore always renders; the header and rows only when
-  // something is scheduled today. S5: confirm against the design artifact.
+  // Q24 hides empty sections, but Q21 makes this section the only place a Routine can be
+  // created — at zero Routines those can't both hold, or the first one could never exist.
+  // Resolved at integration: the "+ routine" affordance always renders; the header and rows
+  // only when something is scheduled today.
   const addButton = (
     <button
       onClick={() => setEditing(null)}
