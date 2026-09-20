@@ -1,9 +1,10 @@
 import { create } from 'zustand'
 import { localStorageRepository, type Repository, type Snapshot } from './repository'
-import { migrateV1, migrateV2 } from './migrate'
+import { migrateV1, migrateV2, migrateV3 } from './migrate'
 import { useTasks } from './tasks'
 import { useSpaces, sortSpaces } from './spaces'
 import { useRoutines, routineRecords } from './routines'
+import { useBlocks } from './blocks'
 import { useTombstones } from './tombstones'
 
 const repo: Repository = localStorageRepository
@@ -23,7 +24,7 @@ export async function hydrate(): Promise<void> {
 
   let snapshot = await repo.load()
   if (!snapshot) {
-    snapshot = migrateV2(migrateV1(await loadDevSeed()))
+    snapshot = migrateV3(migrateV2(migrateV1(await loadDevSeed())))
     await repo.save(snapshot)
   }
   applySnapshot(snapshot)
@@ -32,6 +33,7 @@ export async function hydrate(): Promise<void> {
   useTasks.subscribe(save)
   useSpaces.subscribe(save)
   useRoutines.subscribe(save)
+  useBlocks.subscribe(save)
   useTombstones.subscribe(save)
 
   useHydration.setState({ hydrated: true })
@@ -42,6 +44,7 @@ export function applySnapshot(snapshot: Snapshot): void {
   useTasks.setState({ tasks: snapshot.tasks })
   useSpaces.setState({ spaces: sortSpaces(snapshot.spaces) })
   useRoutines.getState().replaceAll(snapshot.routines, snapshot.checkIns)
+  useBlocks.getState().replaceAll(snapshot.blocks, snapshot.placements)
   useTombstones.setState({ tombstones: snapshot.tombstones })
 }
 
@@ -50,6 +53,8 @@ export const currentSnapshot = (): Snapshot => ({
   spaces: useSpaces.getState().spaces,
   routines: routineRecords(useRoutines.getState().routines),
   checkIns: useRoutines.getState().checkIns,
+  blocks: useBlocks.getState().blocks,
+  placements: useBlocks.getState().placements,
   tombstones: useTombstones.getState().tombstones,
 })
 

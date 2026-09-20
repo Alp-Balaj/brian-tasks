@@ -1,10 +1,12 @@
-// The sync model, in one place: every Task, Space, Routine and Check-in is a row
-// keyed by (kind, id) with an `updatedAt`; a deletion is the same row with
-// `deleted: true` and `updatedAt` = when it was deleted. Newer `updatedAt` wins,
-// whichever Device it came from (ADR 0001). The server applies exactly this rule.
+// The sync model, in one place: every Task, Space, Routine, Check-in, Block and
+// Placement is a row keyed by (kind, id) with an `updatedAt`; a deletion is the
+// same row with `deleted: true` and `updatedAt` = when it was deleted. Newer
+// `updatedAt` wins, whichever Device it came from (ADR 0001). The server applies
+// exactly this rule.
 import type { ISODateTime, Task } from '../domain/task'
 import { DEFAULT_SPACE_ID, defaultSpace, type Space } from '../domain/space'
 import { checkInId, type CheckIn, type RoutineRecord } from '../domain/routine'
+import { isTimed, type Block, type Placement } from '../domain/block'
 import type { RowKind, Tombstone } from '../store/tombstones'
 import type { Snapshot } from '../store/repository'
 
@@ -33,6 +35,8 @@ export function toRows(snapshot: Snapshot): SyncRow[] {
     ...snapshot.tasks.map((t) => live('task', t.id, t.updatedAt, t)),
     ...snapshot.routines.map((r) => live('routine', r.id, r.updatedAt, r)),
     ...snapshot.checkIns.map((c) => live('checkin', checkInId(c.routineId, c.date), c.updatedAt, c)),
+    ...snapshot.blocks.map((b) => live('block', b.id, b.updatedAt, b)),
+    ...snapshot.placements.map((p) => live('placement', p.id, p.updatedAt, p)),
     ...snapshot.tombstones.map((t) => ({ kind: t.kind, id: t.id, updatedAt: t.deletedAt, deleted: true, data: null })),
   ]
 }
@@ -54,13 +58,17 @@ export function mergeRows(local: SyncRow[], incoming: SyncRow[]): SyncRow[] {
 /**
  * Rows back into a Snapshot, repairing what independent edits can leave behind:
  * a Task whose Space was deleted elsewhere moves to Personal, Check-ins of a
- * deleted Routine go with it, and Personal itself can never be deleted.
+ * deleted Routine go with it, and Personal itself can never be deleted. Likewise a
+ * Placement of a deleted Task is dropped, one whose Block is gone keeps only its
+ * hour (and is dropped when it has none), and a Block forgets deleted Routines.
  */
 export function fromRows(rows: SyncRow[]): Snapshot {
   const tasks: Task[] = []
   const spaces: Space[] = []
   const routines: RoutineRecord[] = []
   const checkIns: CheckIn[] = []
+  const blocks: Block[] = []
+  const placements: Placement[] = []
   const tombstones: Tombstone[] = []
 
   for (const row of rows) {
@@ -83,18 +91,35 @@ export function fromRows(rows: SyncRow[]): Snapshot {
       case 'checkin':
         checkIns.push(row.data as CheckIn)
         break
+      case 'block':
+        blocks.push(row.data as Block)
+        break
+      case 'placement':
+        placements.push(row.data as Placement)
+        break
     }
   }
 
   if (!spaces.some((s) => s.id === DEFAULT_SPACE_ID)) spaces.push(defaultSpace())
   const spaceIds = new Set(spaces.map((s) => s.id))
   const routineIds = new Set(routines.map((r) => r.id))
+  const taskIds = new Set(tasks.map((t) => t.id))
+  const blockIds = new Set(blocks.map((b) => b.id))
 
   return {
     tasks: tasks.map((t) => (spaceIds.has(t.spaceId) ? t : { ...t, spaceId: DEFAULT_SPACE_ID })),
     spaces,
     routines,
     checkIns: checkIns.filter((c) => routineIds.has(c.routineId)),
+    blocks: blocks.map((b) =>
+      b.routineIds.every((id) => routineIds.has(id)) ? b : { ...b, routineIds: b.routineIds.filter((id) => routineIds.has(id)) },
+    ),
+    placements: placements.flatMap((p) => {
+      if (!taskIds.has(p.taskId)) return []
+      if (p.blockId === undefined || blockIds.has(p.blockId)) return [p]
+      const { blockId: _gone, ...unlinked } = p
+      return isTimed(unlinked) ? [unlinked] : []
+    }),
     tombstones,
   }
 }

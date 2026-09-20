@@ -83,7 +83,7 @@ app.use('*', serveStatic({ root: './dist' }))
 // Client-side routes (/board, /calendar, ...) all load index.html.
 app.get('*', serveStatic({ root: './dist', path: 'index.html' }))
 
-const KINDS = new Set(['task', 'space', 'routine', 'checkin'])
+const KINDS = new Set(['task', 'space', 'routine', 'checkin', 'block', 'placement'])
 function isRow(v: unknown): v is Row {
   if (typeof v !== 'object' || v === null) return false
   const r = v as Record<string, unknown>

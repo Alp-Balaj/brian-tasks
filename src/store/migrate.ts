@@ -12,6 +12,9 @@ export interface SnapshotV2 {
   routines: Routine[]
 }
 
+/** The v3 on-device shape: v4 without Blocks and Placements. */
+export type SnapshotV3 = Omit<Snapshot, 'blocks' | 'placements'>
+
 /**
  * v1 → v2. v1 was a bare `Task[]` with no spaces, no routines, and "archived"
  * expressed as a tag. Every task lands in the default space, unpinned; the tag
@@ -31,7 +34,7 @@ export function migrateV1(tasks: unknown[]): SnapshotV2 {
  * Spaces gain `updatedAt`, so that every synced record can be compared between
  * Devices. Nothing is deleted, so there are no tombstones to carry over.
  */
-export function migrateV2(v2: SnapshotV2): Snapshot {
+export function migrateV2(v2: SnapshotV2): SnapshotV3 {
   const now = new Date().toISOString()
   const routines: RoutineRecord[] = []
   const checkIns: CheckIn[] = []
@@ -46,6 +49,14 @@ export function migrateV2(v2: SnapshotV2): Snapshot {
     checkIns,
     tombstones: [],
   }
+}
+
+/**
+ * v3 → v4. Blocks and Placements are new record kinds (D7); a v3 Device simply has
+ * none yet. Nothing else changes shape.
+ */
+export function migrateV3(v3: SnapshotV3): Snapshot {
+  return { ...v3, blocks: [], placements: [] }
 }
 
 function migrateTask(raw: Record<string, unknown>): Task {

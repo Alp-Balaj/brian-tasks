@@ -11,6 +11,7 @@ import type { Row } from './db.ts'
 import { buildTask, type Task } from '../src/domain/task.ts'
 import { defaultSpace, type Space } from '../src/domain/space.ts'
 import type { CheckIn, RoutineRecord } from '../src/domain/routine.ts'
+import type { Block, Placement } from '../src/domain/block.ts'
 
 const NOW = new Date(2026, 8, 20, 10, 0, 0) // Sunday 20 Sep 2026, local time
 const TODAY = '2026-09-20'
@@ -31,6 +32,8 @@ function memoryRecords(seed: Row[] = []): Records & { rows: Map<string, Row> } {
     spaces: live<Space>('space'),
     routines: live<RoutineRecord>('routine'),
     checkIns: live<CheckIn>('checkin'),
+    blocks: live<Block>('block'),
+    placements: live<Placement>('placement'),
     async put(incoming) {
       for (const row of incoming) {
         const key = `${row.kind}:${row.id}`

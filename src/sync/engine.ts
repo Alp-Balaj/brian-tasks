@@ -6,6 +6,7 @@ import { applySnapshot, currentSnapshot } from '../store/persist'
 import { useTasks } from '../store/tasks'
 import { useSpaces } from '../store/spaces'
 import { useRoutines } from '../store/routines'
+import { useBlocks } from '../store/blocks'
 import { useTombstones } from '../store/tombstones'
 import { api, ApiError } from './client'
 import { applyRemote, toRows } from './merge'
@@ -33,6 +34,7 @@ export async function startSync(): Promise<void> {
   useTasks.subscribe(schedule)
   useSpaces.subscribe(schedule)
   useRoutines.subscribe(schedule)
+  useBlocks.subscribe(schedule)
   useTombstones.subscribe(schedule)
 
   window.addEventListener('online', () => void sync())

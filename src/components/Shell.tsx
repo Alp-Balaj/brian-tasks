@@ -1,14 +1,19 @@
 import { useState, type ComponentType } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
+import type { ISODate, Task } from '../domain/task'
+import type { Minutes, NewBlock } from '../domain/block'
 import { TaskEditor } from './TaskEditor'
 import { QuickAdd } from './QuickAdd'
+import { BlockSheet } from './BlockSheet'
+import { PlacementSheet } from './PlacementSheet'
 import { SpaceSwitcher } from './SpaceSwitcher'
 import { SyncBadge } from './SyncBadge'
-import { ArchiveIcon, BoardIcon, CalendarIcon, HomeIcon, ListIcon, PlusIcon } from './icons'
+import { ArchiveIcon, BoardIcon, CalendarIcon, HomeIcon, ListIcon, PlusIcon, WeekIcon } from './icons'
 
-/** The four mobile tabs. Archive is desktop-sidebar only, plus a footer link on List (Q29). */
+/** The five mobile tabs (the platform maximum). Archive is desktop-sidebar only, plus a footer link on List (Q29). */
 const NAV: { to: string; label: string; Icon: ComponentType<{ size?: number }> }[] = [
   { to: '/home', label: 'Home', Icon: HomeIcon },
+  { to: '/week', label: 'Week', Icon: WeekIcon },
   { to: '/board', label: 'Board', Icon: BoardIcon },
   { to: '/list', label: 'List', Icon: ListIcon },
   { to: '/calendar', label: 'Calendar', Icon: CalendarIcon },
@@ -19,14 +24,30 @@ const sidebarLink = ({ isActive }: { isActive: boolean }) =>
     isActive ? 'bg-surface-2 font-medium text-fg' : 'text-fg-muted hover:bg-surface-2 hover:text-fg'
   }`
 
+/** What the block sheet is open on: an existing block, or a new one on `date`. */
+type BlockSheetState = { blockId: string | null; date: ISODate; preset?: Partial<NewBlock> }
+/** What the placement sheet is open on: an existing placement, or a new one on `date`. */
+type PlacementSheetState = { placementId: string | null; date: ISODate; preset?: { start?: Minutes; end?: Minutes; taskId?: string } }
+
 /**
  * App frame. Desktop: left sidebar + content. Mobile: header + content + bottom tab bar,
  * with the add button floating above the tabs (thumb-reachable, HIG/M3 placement).
- * The selected task (for editing) is app-level state so every view can open it.
+ * The selected task (for editing) is app-level state so every view can open it; so
+ * are the block and placement sheets, which Home and Week share (§5.1).
  */
 export function Shell() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [quickAddOpen, setQuickAddOpen] = useState(false)
+  const [blockSheet, setBlockSheet] = useState<BlockSheetState | null>(null)
+  const [placementSheet, setPlacementSheet] = useState<PlacementSheetState | null>(null)
+
+  const shell: ShellContext = {
+    openTask: setEditingId,
+    openBlock: (id, date) => setBlockSheet({ blockId: id, date }),
+    newBlock: (date, preset) => setBlockSheet({ blockId: null, date, preset }),
+    openPlacement: (id, date) => setPlacementSheet({ placementId: id, date }),
+    placeTask: (task, date, span) => setPlacementSheet({ placementId: null, date, preset: { ...span, taskId: task?.id } }),
+  }
 
   return (
     <div className="flex h-full flex-col md:flex-row">
@@ -72,7 +93,7 @@ export function Shell() {
       </header>
 
       <main className="min-h-0 flex-1 overflow-auto pb-[calc(var(--spacing-tabbar)+env(safe-area-inset-bottom))] md:pb-0">
-        <Outlet context={{ openTask: setEditingId } satisfies ShellContext} />
+        <Outlet context={shell} />
       </main>
 
       {/* Mobile FAB */}
@@ -103,6 +124,8 @@ export function Shell() {
       </nav>
 
       {editingId && <TaskEditor taskId={editingId} onClose={() => setEditingId(null)} />}
+      {blockSheet && <BlockSheet {...blockSheet} onClose={() => setBlockSheet(null)} />}
+      {placementSheet && <PlacementSheet {...placementSheet} onClose={() => setPlacementSheet(null)} />}
       {quickAddOpen && <QuickAdd onClose={() => setQuickAddOpen(false)} />}
     </div>
   )
@@ -110,4 +133,15 @@ export function Shell() {
 
 export interface ShellContext {
   openTask: (id: string) => void
+  /** An existing block's sheet, as seen from `date`: its week is where edits apply from (TB-5). */
+  openBlock: (id: string, date: ISODate) => void
+  /** A new block draft on `date`; `preset` prefills e.g. the span from a drag (TB-13, TB-22). */
+  newBlock: (date: ISODate, preset?: Partial<NewBlock>) => void
+  /** An existing placement's sheet. */
+  openPlacement: (id: string, date: ISODate) => void
+  /**
+   * The placement form for `task` on `date` (TB-13): from a tray chip, or from a drag
+   * with the span and no task yet (`null` — the form asks for one).
+   */
+  placeTask: (task: Task | null, date: ISODate, span?: { start: Minutes; end: Minutes }) => void
 }

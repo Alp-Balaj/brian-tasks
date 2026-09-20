@@ -5,6 +5,7 @@
 import type { Task } from '../src/domain/task.ts'
 import type { Space } from '../src/domain/space.ts'
 import type { CheckIn, RoutineRecord } from '../src/domain/routine.ts'
+import type { Block, Placement } from '../src/domain/block.ts'
 import { readRows, writeRows, type Row } from './db.ts'
 
 export interface Records {
@@ -12,6 +13,9 @@ export interface Records {
   spaces(): Promise<Space[]>
   routines(): Promise<RoutineRecord[]>
   checkIns(): Promise<CheckIn[]>
+  /** Every version of every Block (ADR 0003); filter with `blocksOn` / `blocksInWeek`. */
+  blocks(): Promise<Block[]>
+  placements(): Promise<Placement[]>
   /** Newest `updatedAt` wins, same as sync. A `deleted` row is a tombstone. */
   put(rows: Row[]): Promise<void>
 }
@@ -23,5 +27,7 @@ export const pgRecords: Records = {
   spaces: live<Space>('space'),
   routines: live<RoutineRecord>('routine'),
   checkIns: live<CheckIn>('checkin'),
+  blocks: live<Block>('block'),
+  placements: live<Placement>('placement'),
   put: writeRows,
 }

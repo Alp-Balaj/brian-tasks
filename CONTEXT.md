@@ -22,11 +22,11 @@ The hard deadline of a Task.
 _Avoid_: Deadline
 
 **Scheduled**:
-The day you intend to work on a Task. Not a commitment to finish it.
+The day you intend to work on a Task. Not a commitment to finish it. Placing a Task on a day sets this to that day (the earliest, if placed on several).
 _Avoid_: Planned
 
 **Overdue**:
-A Task whose Due date has passed and which is not done. The first thing Home shows.
+A Task whose Due date has passed and which is not done. Home shows it right after Today.
 _Avoid_: Late, missed (reserved for Routines)
 
 **Tag**:
@@ -78,10 +78,34 @@ The number of consecutive scheduled days, ending today or yesterday, that have a
 **Today**:
 The current calendar day in local time, rolling over at midnight.
 
+### Time
+
+**Block**:
+A named, coloured span of one day on the Week page (Job 09–17). Not a Task, not an appointment.
+_Avoid_: Event, slot, session
+
+**Standing**:
+A Block that carries to every following week until told otherwise.
+_Avoid_: Recurring, template, repeating
+
+**Open time**:
+Any part of a day with no Block. Never computed, only seen.
+
+**Placement**:
+A Task put on a specific day, inside a Block and/or at an hour. A Task can have several.
+_Avoid_: Event, time slot, booking
+
+**Placed / Unplaced**:
+A Task is placed on a day when it has a Placement there; unplaced = Scheduled for a day with no Placement on it.
+
+**Week**:
+The page: seven day rows, 00–24, Blocks and Placements drawn to scale, plus each day's unplaced tray.
+_Avoid_: Schedule, timetable, planner
+
 ### Home
 
 **Home**:
-The landing page. Shows only Today's Routines and the few Tasks that matter right now, across all Spaces: Overdue first, then what is due or Scheduled Today, then Pinned, then in progress. A Task appears once, in the first of those it qualifies for.
+The landing page. Today's strip of Blocks and Placements at the very top, then only the few Tasks that matter right now and Today's Routines, across all Spaces: what is due or Scheduled Today, then Overdue, then Routines, then Pinned, then in progress. A Task appears once, in the first of those it qualifies for.
 _Avoid_: Dashboard, overview, today view
 
 ### Archive

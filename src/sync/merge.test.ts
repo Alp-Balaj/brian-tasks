@@ -4,6 +4,7 @@ import type { Snapshot } from '../store/repository'
 import type { Task } from '../domain/task'
 import { defaultSpace, DEFAULT_SPACE_ID } from '../domain/space'
 import type { RoutineRecord } from '../domain/routine'
+import { BLOCK_COLOURS, type Block, type Placement } from '../domain/block'
 
 const T = (n: number) => `2026-09-20T10:00:${String(n).padStart(2, '0')}.000Z`
 
@@ -33,11 +34,36 @@ const routine = (id: string, updatedAt: string): RoutineRecord => ({
   updatedAt,
 })
 
+const block = (id: string, updatedAt: string, extra: Partial<Block> = {}): Block => ({
+  id,
+  name: 'Job',
+  colour: BLOCK_COLOURS[0],
+  weekday: 3,
+  start: 540,
+  end: 1020,
+  from: '2026-09-14',
+  routineIds: [],
+  createdAt: T(0),
+  updatedAt,
+  ...extra,
+})
+
+const placement = (id: string, updatedAt: string, extra: Partial<Placement> = {}): Placement => ({
+  id,
+  taskId: 'a',
+  date: '2026-09-16',
+  createdAt: T(0),
+  updatedAt,
+  ...extra,
+})
+
 const snapshot = (partial: Partial<Snapshot> = {}): Snapshot => ({
   tasks: [],
   spaces: [defaultSpace()],
   routines: [],
   checkIns: [],
+  blocks: [],
+  placements: [],
   tombstones: [],
   ...partial,
 })
@@ -63,9 +89,16 @@ describe('toRows / fromRows', () => {
       tasks: [task('a', T(1))],
       routines: [routine('r', T(1))],
       checkIns: [{ routineId: 'r', date: '2026-09-20', updatedAt: T(2) }],
+      blocks: [block('b', T(1), { routineIds: ['r'], until: '2026-09-28' })],
+      placements: [placement('p', T(1), { blockId: 'b' }), placement('q', T(2), { start: 600, end: 660 })],
       tombstones: [{ kind: 'task', id: 'z', deletedAt: T(3) }],
     })
     expect(fromRows(toRows(s))).toEqual(s)
+  })
+
+  it('emits block and placement rows under their own kinds', () => {
+    const rows = toRows(snapshot({ blocks: [block('b', T(1))], placements: [placement('p', T(2), { blockId: 'b' })] }))
+    expect(rows.map((r) => `${r.kind}:${r.id}`)).toEqual(['space:personal', 'block:b', 'placement:p'])
   })
 })
 
@@ -136,6 +169,59 @@ describe('applyRemote — scenarios from the design agreement', () => {
     const merged = applyRemote(local, [gone('routine', 'r', T(2))])
     expect(merged.routines).toEqual([])
     expect(merged.checkIns).toEqual([])
+  })
+
+  it('a Placement of a Task deleted elsewhere is dropped', () => {
+    const local = snapshot({
+      tasks: [task('a', T(0))],
+      placements: [placement('p', T(1), { start: 600, end: 660 })],
+    })
+    expect(applyRemote(local, [gone('task', 'a', T(2))]).placements).toEqual([])
+  })
+
+  it('a Placement whose Block was deleted elsewhere keeps its hour, or goes when it has none', () => {
+    const local = snapshot({
+      tasks: [task('a', T(0))],
+      blocks: [block('b', T(0))],
+      placements: [
+        placement('timed', T(1), { blockId: 'b', start: 600, end: 660 }),
+        placement('untimed', T(1), { blockId: 'b' }),
+        placement('elsewhere', T(1), { blockId: 'other' }),
+      ],
+    })
+    const merged = applyRemote(
+      local,
+      [gone('block', 'b', T(2)), row('block', 'other', T(2), block('other', T(2)))],
+    )
+    expect(merged.placements).toEqual([
+      { id: 'timed', taskId: 'a', date: '2026-09-16', start: 600, end: 660, createdAt: T(0), updatedAt: T(1) },
+      placement('elsewhere', T(1), { blockId: 'other' }),
+    ])
+    expect('blockId' in merged.placements[0]).toBe(false)
+  })
+
+  it('a Block forgets a Routine deleted elsewhere, and keeps the rest', () => {
+    const local = snapshot({
+      routines: [routine('r', T(0)), routine('s', T(0))],
+      blocks: [block('b', T(1), { routineIds: ['r', 's'] })],
+    })
+    const merged = applyRemote(local, [gone('routine', 'r', T(2))])
+    expect(merged.blocks[0].routineIds).toEqual(['s'])
+    expect(merged.blocks[0].updatedAt).toBe(T(1))
+  })
+
+  it('a Block edited on one Device and its Placement made on another both arrive', () => {
+    const local = snapshot({
+      tasks: [task('a', T(0))],
+      blocks: [block('b', T(1), { start: 540 })],
+    })
+    const remote = [
+      row('block', 'b', T(2), block('b', T(2), { start: 510 })),
+      row('placement', 'p', T(2), placement('p', T(2), { blockId: 'b' })),
+    ]
+    const merged = applyRemote(local, remote)
+    expect(merged.blocks[0].start).toBe(510)
+    expect(merged.placements.map((p) => p.id)).toEqual(['p'])
   })
 
   it('Personal can never be deleted', () => {

@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import type { ISODateTime } from '../domain/task'
 
 /** The kinds of record that sync between Devices. Check-in ids are `routineId:date`. */
-export type RowKind = 'task' | 'space' | 'routine' | 'checkin'
+export type RowKind = 'task' | 'space' | 'routine' | 'checkin' | 'block' | 'placement'
 
 /**
  * A deletion, remembered so that a Device that was offline learns about it when

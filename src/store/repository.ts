@@ -1,8 +1,9 @@
 import type { Task } from '../domain/task'
 import type { Space } from '../domain/space'
 import type { CheckIn, RoutineRecord } from '../domain/routine'
+import type { Block, Placement } from '../domain/block'
 import type { Tombstone } from './tombstones'
-import { migrateV1, migrateV2, type SnapshotV2 } from './migrate'
+import { migrateV1, migrateV2, migrateV3, type SnapshotV2, type SnapshotV3 } from './migrate'
 
 /** Everything the app persists on this Device, saved and loaded as one unit. */
 export interface Snapshot {
@@ -10,6 +11,9 @@ export interface Snapshot {
   spaces: Space[]
   routines: RoutineRecord[]
   checkIns: CheckIn[]
+  /** Every version of every Block (ADR 0003). */
+  blocks: Block[]
+  placements: Placement[]
   /** Deletions the server has not been told about yet. */
   tombstones: Tombstone[]
 }
@@ -26,6 +30,7 @@ export interface Repository {
   save(snapshot: Snapshot): Promise<void>
 }
 
+const V4_KEY = 'brian-tasks:v4'
 const V3_KEY = 'brian-tasks:v3'
 const V2_KEY = 'brian-tasks:v2'
 const V1_KEY = 'brian-tasks:v1'
@@ -33,13 +38,15 @@ const V1_KEY = 'brian-tasks:v1'
 export const localStorageRepository: Repository = {
   async load() {
     try {
-      const v3 = parse(localStorage.getItem(V3_KEY))
-      if (isSnapshot(v3)) return v3
+      const v4 = parse(localStorage.getItem(V4_KEY))
+      if (isSnapshot(v4)) return v4
       // One-time upgrades. Older keys are left in place so an older build still works.
+      const v3 = parse(localStorage.getItem(V3_KEY))
+      if (isSnapshotV3(v3)) return upgraded(migrateV3(v3))
       const v2 = parse(localStorage.getItem(V2_KEY))
-      if (isSnapshotV2(v2)) return upgraded(migrateV2(v2))
+      if (isSnapshotV2(v2)) return upgraded(migrateV3(migrateV2(v2)))
       const v1 = parse(localStorage.getItem(V1_KEY))
-      if (v1) return upgraded(migrateV2(migrateV1(Array.isArray(v1) ? v1 : [])))
+      if (v1) return upgraded(migrateV3(migrateV2(migrateV1(Array.isArray(v1) ? v1 : []))))
       return null
     } catch {
       return null
@@ -47,7 +54,7 @@ export const localStorageRepository: Repository = {
   },
   async save(snapshot) {
     try {
-      localStorage.setItem(V3_KEY, JSON.stringify(snapshot))
+      localStorage.setItem(V4_KEY, JSON.stringify(snapshot))
     } catch {
       // Storage quota / private mode — the in-memory state still works for the session.
     }
@@ -67,8 +74,14 @@ function isSnapshotV2(v: unknown): v is SnapshotV2 {
   return Array.isArray(s.tasks) && Array.isArray(s.spaces) && Array.isArray(s.routines)
 }
 
-function isSnapshot(v: unknown): v is Snapshot {
+function isSnapshotV3(v: unknown): v is SnapshotV3 {
   if (!isSnapshotV2(v)) return false
   const s = v as unknown as Record<string, unknown>
   return Array.isArray(s.checkIns) && Array.isArray(s.tombstones)
+}
+
+function isSnapshot(v: unknown): v is Snapshot {
+  if (!isSnapshotV3(v)) return false
+  const s = v as unknown as Record<string, unknown>
+  return Array.isArray(s.blocks) && Array.isArray(s.placements)
 }
