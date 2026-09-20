@@ -1,6 +1,8 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useRoutines } from '../../store/routines'
+import { useBlocks } from '../../store/blocks'
 import { hasCheckIn, isScheduledOn } from '../../domain/routine'
+import { blocksOn, describeMinutes } from '../../domain/block'
 import type { ISODate } from '../../domain/task'
 import { RoutineRow } from '../../components/RoutineRow'
 import { RoutineEditor } from '../../components/RoutineEditor'
@@ -11,6 +13,14 @@ import { PlusIcon } from '../../components/icons'
 /** "Routines": one row per non-archived Routine scheduled today, with today's tally (Q10, Q21, Q23). */
 export function RoutinesSection({ today }: { today: ISODate }) {
   const routines = useRoutines((s) => s.routines)
+  const blocks = useBlocks((s) => s.blocks)
+  // TB-20: a Routine linked to a block today shows that block's hour — the earliest
+  // one, since `blocksOn` sorts by start.
+  const todayBlocks = useMemo(() => blocksOn(blocks, today), [blocks, today])
+  const at = (routineId: string) => {
+    const block = todayBlocks.find((b) => b.routineIds.includes(routineId))
+    return block ? describeMinutes(block.start) : undefined
+  }
   // `null` = creating; a string = editing that routine; undefined = closed.
   const [editing, setEditing] = useState<string | null | undefined>(undefined)
 
@@ -48,7 +58,14 @@ export function RoutinesSection({ today }: { today: ISODate }) {
           </div>
           <RowGroup>
             {scheduled.map((r) => (
-              <RoutineRow key={r.id} routine={r} today={today} todayDate={todayDate} onOpen={() => setEditing(r.id)} />
+              <RoutineRow
+                key={r.id}
+                routine={r}
+                today={today}
+                todayDate={todayDate}
+                at={at(r.id)}
+                onOpen={() => setEditing(r.id)}
+              />
             ))}
           </RowGroup>
         </>

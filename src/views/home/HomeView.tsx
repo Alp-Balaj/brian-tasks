@@ -3,6 +3,8 @@ import { format } from 'date-fns'
 import type { Task } from '../../domain/task'
 import { useTasks } from '../../store/tasks'
 import { useRoutines } from '../../store/routines'
+import { useBlocks } from '../../store/blocks'
+import { blocksOn, describeSpan, isTimed, placementsOn } from '../../domain/block'
 import { useShell } from '../../components/useShell'
 import { useToday } from '../../lib/useToday'
 import { RowGroup } from '../../components/TaskRow'
@@ -10,6 +12,7 @@ import { ChipButton, SectionLabel } from '../../components/ui'
 import { CloseIcon } from '../../components/icons'
 import { RoutinesSection } from './RoutinesSection'
 import { HomeTaskRow } from './HomeTaskRow'
+import { TodayStrip } from './TodayStrip'
 import { homeSections } from '../../domain/home'
 
 /** Rows shown per section before "Show more" (Q5: Home is glanceable, not exhaustive). */
@@ -50,9 +53,10 @@ function Section<T>({
 }
 
 /**
- * Landing page: Overdue · Routines · Today · Pinned · In progress, across every Space
- * (Q3, Q24). A task just checked off here lingers struck-through in its section until
- * you leave Home, so an accidental tap is one more tap to undo (Q6).
+ * Landing page: today's strip, then Today · Overdue · Routines · Pinned · In progress,
+ * across every Space (Q3, Q24, TB-20). A task just checked off here lingers
+ * struck-through in its section until you leave Home, so an accidental tap is one more
+ * tap to undo (Q6).
  */
 export function HomeView() {
   const tasks = useTasks((s) => s.tasks)
@@ -74,6 +78,21 @@ export function HomeView() {
     [tasks, linger],
   )
   const { overdue, today: todayRows, pinned, inProgress } = useMemo(() => homeSections(placed, today), [placed, today])
+
+  // TB-20: a task placed today carries its hour, or the block's name when only linked.
+  // Timed placements win; among several, the earliest (placementsOn sorts by start).
+  const blocks = useBlocks((s) => s.blocks)
+  const placements = useBlocks((s) => s.placements)
+  const hourOf = useMemo(() => {
+    const todayBlocks = new Map(blocksOn(blocks, today).map((b) => [b.id, b]))
+    const hours = new Map<string, string>()
+    for (const p of placementsOn(placements, today)) {
+      if (hours.has(p.taskId)) continue
+      const label = isTimed(p) ? describeSpan(p.start, p.end) : p.blockId && todayBlocks.get(p.blockId)?.name
+      if (label) hours.set(p.taskId, label)
+    }
+    return hours
+  }, [blocks, placements, today])
 
   const setDone = (task: Task, done: boolean) => {
     if (done) {
@@ -97,6 +116,7 @@ export function HomeView() {
         key={task.id}
         task={current}
         reason={extra?.reason}
+        hour={hourOf.get(task.id)}
         onOpen={() => openTask(task.id)}
         onToggleDone={(done) => setDone(current, done)}
         trailing={extra?.trailing}
@@ -123,6 +143,10 @@ export function HomeView() {
         <p className="mt-0.5 text-sm text-fg-muted">{summary.length > 0 ? summary.join(' · ') : 'Nothing due.'}</p>
       </header>
 
+      <TodayStrip today={today} />
+
+      <Section title="Today" items={todayRows} render={({ task, reason }) => row(task, { reason })} />
+
       <Section
         title="Overdue"
         tone="danger"
@@ -140,8 +164,6 @@ export function HomeView() {
       />
 
       <RoutinesSection today={today} />
-
-      <Section title="Today" items={todayRows} render={({ task, reason }) => row(task, { reason })} />
 
       <Section
         title="Pinned"
