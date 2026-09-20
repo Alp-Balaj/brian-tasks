@@ -89,8 +89,25 @@ describe('updateBlockFrom (TB-5)', () => {
 
   it('does nothing for a week the version had already ended before', () => {
     const b = useBlocks.getState().addBlock({ ...JOB, carry: false })
-    useBlocks.getState().updateBlockFrom(b.id, W2, { start: 510 })
+    expect(useBlocks.getState().updateBlockFrom(b.id, W2, { start: 510 })).toBeUndefined()
     expect(blocks()).toEqual([b])
+  })
+
+  it('returns the id of the version the change landed on, so an open sheet can follow a split', () => {
+    const { addBlock, updateBlockFrom, setCarry } = useBlocks.getState()
+    const b = addBlock(JOB)
+    expect(updateBlockFrom(b.id, W0, { start: 510 })).toBe(b.id)
+    const futureId = updateBlockFrom(b.id, W1, { start: 480 })!
+    expect(futureId).not.toBe(b.id)
+    expect(blocks().find((x) => x.id === futureId)).toMatchObject({ from: W1, start: 480 })
+    // The next edit through the returned id patches in place.
+    expect(updateBlockFrom(futureId, W1, { end: 1080 })).toBe(futureId)
+    expect(blocks()).toHaveLength(2)
+    // setCarry follows the same rule, including when it is a no-op.
+    expect(setCarry(futureId, W1, true)).toBe(futureId)
+    const laterId = setCarry(futureId, W2, false)!
+    expect(laterId).not.toBe(futureId)
+    expect(blocks().find((x) => x.id === laterId)).toMatchObject({ from: W2, until: '2026-10-05' })
   })
 
   it('moving the block to another weekday moves its placements with it', () => {
