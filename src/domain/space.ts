@@ -22,17 +22,26 @@ export const ALL_SPACES = 'all' as const
 /** A Space id, or ALL_SPACES. */
 export type SpaceSelection = string | typeof ALL_SPACES
 
-/** Picker palette. Kept deliberately small so colours stay tellable apart. */
-export const SPACE_COLOURS: readonly string[] = [
-  '#2f6f5e', // green
-  '#5b6fb8', // blue
-  '#a8622a', // orange
-  '#8a5a9c', // purple
-  '#b8434e', // red
-  '#c39a2a', // yellow
-  '#2a8fa8', // teal
-  '#6f7873', // grey
-]
+/** Picker palette by name. Kept deliberately small so colours stay tellable apart. */
+export const SPACE_COLOUR_NAMES = {
+  green: '#2f6f5e',
+  blue: '#5b6fb8',
+  orange: '#a8622a',
+  purple: '#8a5a9c',
+  red: '#b8434e',
+  yellow: '#c39a2a',
+  teal: '#2a8fa8',
+  grey: '#6f7873',
+} as const
+
+export type SpaceColourName = keyof typeof SPACE_COLOUR_NAMES
+
+/** The palette as hex values, in picker order. */
+export const SPACE_COLOURS: readonly string[] = Object.values(SPACE_COLOUR_NAMES)
+
+/** First palette colour no Space uses yet, so new Spaces stay tellable apart by default. */
+export const nextFreeColour = (spaces: readonly Space[]): string =>
+  SPACE_COLOURS.find((c) => !spaces.some((s) => s.colour === c)) ?? SPACE_COLOURS[0]
 
 export type NewSpace = Pick<Space, 'name' | 'colour'>
 export type SpacePatch = Partial<Omit<Space, 'id' | 'updatedAt'>>

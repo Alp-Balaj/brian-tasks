@@ -21,7 +21,7 @@ The app runs without the server (everything works from local storage; the badge 
 ```
 src/
   domain/task.ts        Task model, statuses, priorities. No UI/storage deps.
-  domain/space.ts       Space model, DEFAULT_SPACE_ID ('personal'), ALL_SPACES, SPACE_COLOURS.
+  domain/space.ts       Space model, DEFAULT_SPACE_ID ('personal'), ALL_SPACES, the colour palette, nextFreeColour.
   domain/routine.ts     Routine model + schedule/streak logic (isScheduledOn, currentStreak, ...).
   store/repository.ts   Snapshot { tasks, spaces, routines, checkIns, tombstones } <-> localStorage.
   store/migrate.ts      One-time v1 -> v2 -> v3 migrations.
@@ -49,7 +49,7 @@ server/index.ts       Hono server: serves dist/ and the /api routes. Node 24 run
 server/db.ts          One Postgres table of synced rows; the same newest-wins rule as sync/merge.ts.
 server/auth.ts        One shared password -> signed HttpOnly cookie (1 year). Login attempts throttled.
 server/mcp.ts         POST /api/mcp: the MCP endpoint Claude and the CLI use. Token-guarded, stateless.
-server/tools.ts       The MCP tools (today, list/get/create/update task, spaces, routines, check-in).
+server/tools.ts       The MCP tools (today, list/get/create/update task, list/create/update space, routines, check-in).
 server/records.ts     The server's typed view of the rows, for the tools. Writes obey the sync rule.
 cli/brian.ts          `brian`: the same tools from a terminal, as an MCP client of /api/mcp.
 scripts/import-obsidian.mjs  Vault TaskNotes -> dev/seed.json (dev first run only; never shipped).
@@ -73,7 +73,7 @@ node scripts/import-obsidian.mjs "/home/alpi/Documents/Brian the brain/1 - Manag
 
 ## Talking to Brian from Claude
 
-The server exposes the app as an MCP server at `https://<host>/api/mcp`, so Claude Code, Claude Cowork, claude.ai and the `brian` CLI can read what is on today and create or change Tasks. Writes land in the same rows table under the same newest-wins rule as a Device's sync, so every Device sees them on its next catch-up (about a minute while open, immediately on open). Tools: `today`, `list_tasks`, `get_task`, `create_task`, `update_task`, `list_spaces`, `list_routines`, `check_in`, `uncheck`. There is no delete: archive instead.
+The server exposes the app as an MCP server at `https://<host>/api/mcp`, so Claude Code, Claude Cowork, claude.ai and the `brian` CLI can read what is on today and create or change Tasks. Writes land in the same rows table under the same newest-wins rule as a Device's sync, so every Device sees them on its next catch-up (about a minute while open, immediately on open). Tools: `today`, `list_tasks`, `get_task`, `create_task`, `update_task`, `list_spaces`, `create_space`, `update_space`, `list_routines`, `check_in`, `uncheck`. There is no delete: archive Tasks instead; Spaces are only ever deleted in the app.
 
 One long random token guards it (`MCP_TOKEN`; `railway variables --set MCP_TOKEN=...`). It is accepted as `Authorization: Bearer <token>`, or as the last path segment (`/api/mcp/<token>`) for connector UIs that cannot set headers. Wrong tokens are throttled per address, sharing the login throttle. `TZ` decides what "today" means for the tools.
 
@@ -91,6 +91,7 @@ npm link                                           # once; puts `brian` on PATH
 brian config https://<host> <token>                # or BRIAN_URL / BRIAN_TOKEN
 brian today
 brian add Renew passport --due 2026-10-01 --space Personal --priority high --pin
+brian space add University --colour purple
 brian ls --space work --status open
 brian done <id>
 brian check "Read 20 pages"

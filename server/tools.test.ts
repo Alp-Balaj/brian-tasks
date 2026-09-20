@@ -207,10 +207,51 @@ describe('routines', () => {
   })
 })
 
-describe('list_spaces', () => {
-  it('is in switcher order and always includes Personal', async () => {
+describe('spaces', () => {
+  it('list_spaces is in switcher order and always includes Personal', async () => {
     records.rows.delete('space:personal')
     const { data } = await call('list_spaces')
     expect(data.map((s: { name: string }) => s.name)).toEqual(['Personal', 'Work'])
+    expect(data[1].colour).toBe('blue')
+  })
+
+  it('create_space stores a row the app will pick up, at the bottom, in the next free colour', async () => {
+    const { data } = await call('create_space', { name: '  University ' })
+    expect(data).toEqual({ id: expect.any(String), name: 'University', colour: 'orange' })
+    const stored = records.rows.get(`space:${data.id}`)!.data as Space
+    expect(stored).toMatchObject({ colour: '#a8622a', order: 2 })
+    sameDay(stored.updatedAt)
+    expect((await call('list_spaces')).data.map((s: { name: string }) => s.name)).toEqual(['Personal', 'Work', 'University'])
+    // ...and Tasks can be filed into it straight away, by name.
+    expect((await call('create_task', { title: 'Essay', space: 'university' })).data.space).toBe('University')
+  })
+
+  it('create_space takes a palette colour by name and rejects others', async () => {
+    const { data } = await call('create_space', { name: 'Side', colour: 'red' })
+    expect(data.colour).toBe('red')
+    expect((records.rows.get(`space:${data.id}`)!.data as Space).colour).toBe('#b8434e')
+    expect((await call('create_space', { name: 'Other', colour: '#123456' })).isError).toBe(true)
+  })
+
+  it('create_space is idempotent on the name', async () => {
+    const { data } = await call('create_space', { name: 'work' })
+    expect(data).toMatchObject({ id: 'w1', name: 'Work', alreadyExists: true })
+    expect(records.rows.size).toBe(9)
+  })
+
+  it('update_space renames and recolours, by name or id', async () => {
+    const { data } = await call('update_space', { space: 'work', name: 'Job', colour: 'teal' })
+    expect(data).toEqual({ id: 'w1', name: 'Job', colour: 'teal' })
+    const stored = records.rows.get('space:w1')!.data as Space
+    expect(stored).toMatchObject({ name: 'Job', colour: '#2a8fa8', order: 1 })
+    sameDay(stored.updatedAt)
+    expect((await call('update_space', { space: 'w1', colour: 'grey' })).data).toMatchObject({ name: 'Job', colour: 'grey' })
+  })
+
+  it('update_space refuses a name another Space has, and an unknown Space', async () => {
+    const clash = await call('update_space', { space: 'Work', name: 'personal' })
+    expect(clash.isError).toBe(true)
+    expect(clash.text).toContain('Personal')
+    expect((await call('update_space', { space: 'Uni', name: 'x' })).isError).toBe(true)
   })
 })

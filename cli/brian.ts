@@ -25,6 +25,8 @@ const HELP = `brian — Brian Tasks from the terminal
                                       --unpin, --archive, --restore
   brian done|start|hold|todo <id>     change status
   brian spaces                        the Spaces
+  brian space add <name> [--colour C] create a Space (green, blue, orange, purple, red, yellow, teal, grey)
+  brian space edit <space> [--name N] [--colour C]
   brian routines                      the Routines and today's state
   brian check <routine> [--date D]    check in (today unless told)
   brian uncheck <routine> [--date D]
@@ -58,6 +60,8 @@ const { values: flags, positionals } = parseArgs({
     archive: { type: 'boolean' },
     restore: { type: 'boolean' },
     date: { type: 'string' },
+    colour: { type: 'string' },
+    name: { type: 'string' },
   },
 })
 
@@ -101,9 +105,18 @@ async function main(): Promise<void> {
         return print(await call(client, 'update_task', { id: need(rest[0], 'id'), status }), printFull)
       }
       case 'spaces':
-        return print(await call(client, 'list_spaces'), (d: { id: string; name: string }[]) =>
-          d.forEach((s) => console.log(`${s.id.padEnd(10)} ${s.name}`)),
-        )
+        return print(await call(client, 'list_spaces'), (d: SpaceView[]) => d.forEach((s) => printSpace(s)))
+      case 'space': {
+        const [action, ...words] = rest
+        if (action === 'add')
+          return print(await call(client, 'create_space', { name: need(words.join(' '), 'name'), colour: flags.colour }), printSpace)
+        if (action === 'edit')
+          return print(
+            await call(client, 'update_space', { space: need(words.join(' '), 'space'), name: flags.name, colour: flags.colour }),
+            printSpace,
+          )
+        throw new Error('Usage: brian space add <name> | brian space edit <space>')
+      }
       case 'routines':
         return print(await call(client, 'list_routines', { include_archived: flags.archived }), printRoutines)
       case 'check':
@@ -219,6 +232,13 @@ interface TaskView {
   completedAt?: string
 }
 
+interface SpaceView {
+  id: string
+  name: string
+  colour: string
+  alreadyExists?: boolean
+}
+
 interface RoutineView {
   id: string
   title: string
@@ -264,6 +284,10 @@ function printFull(t: TaskView): void {
   if (t.description) console.log(`\n${t.description}\n`)
   const stamps = [t.createdAt && `created ${t.createdAt}`, t.completedAt && `completed ${t.completedAt}`]
   console.log(stamps.filter(Boolean).join('  '))
+}
+
+function printSpace(s: SpaceView): void {
+  console.log([s.id.padEnd(10), s.name.padEnd(20), s.colour, s.alreadyExists && '(already existed)'].filter(Boolean).join(' '))
 }
 
 function printRoutines(routines: RoutineView[]): void {

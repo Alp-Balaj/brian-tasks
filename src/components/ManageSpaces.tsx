@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { DEFAULT_SPACE_ID, SPACE_COLOURS, type Space } from '../domain/space'
+import { DEFAULT_SPACE_ID, SPACE_COLOURS, nextFreeColour, type Space } from '../domain/space'
 import { useSpaces } from '../store/spaces'
 import { Sheet } from './Sheet'
 import { SpaceDot } from './TaskCard'
@@ -9,10 +9,6 @@ const field =
   'min-w-0 flex-1 rounded-xl border border-line-strong bg-surface px-3 min-h-10 text-base outline-none focus:border-accent md:text-sm'
 const iconButton =
   'grid h-10 w-10 place-items-center rounded-full text-fg-muted hover:bg-surface-2 hover:text-fg disabled:opacity-30 disabled:hover:bg-transparent'
-
-/** First palette colour no Space uses yet, so new Spaces stay tellable apart by default. */
-const nextFreeColour = (spaces: Space[]) =>
-  SPACE_COLOURS.find((c) => !spaces.some((s) => s.colour === c)) ?? SPACE_COLOURS[0]
 
 /**
  * Create, rename, recolour, reorder and delete Spaces (Q16, Q17). Every change is saved

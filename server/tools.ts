@@ -17,7 +17,7 @@ import {
   type TaskPatch,
   type TaskStatus,
 } from '../src/domain/task.ts'
-import { defaultSpace, type Space } from '../src/domain/space.ts'
+import { defaultSpace, nextFreeColour, SPACE_COLOUR_NAMES, type Space, type SpaceColourName } from '../src/domain/space.ts'
 import {
   checkInId,
   currentStreak,
@@ -33,7 +33,7 @@ import type { Records } from './records.ts'
 
 export const INSTRUCTIONS = `Brian Tasks is a single-person task manager.
 Vocabulary: a Task has a Status (todo, in-progress, hold, done), a Priority (low, normal, high, urgent), optional Tags, an optional Due date (hard deadline) and Scheduled date (the day to work on it), and lives in exactly one Space (Personal, Work, ...). A Pinned Task shows on Home. Archived Tasks are hidden everywhere but the Archive. A Routine is something done repeatedly on a schedule; it is never finished, only checked in for a day.
-Dates are calendar dates, YYYY-MM-DD, in the user's local time. Start with \`today\` to see what matters right now. Tasks are never deleted from here: archive them instead.`
+Dates are calendar dates, YYYY-MM-DD, in the user's local time. Start with \`today\` to see what matters right now. Tasks are never deleted from here: archive them instead. Spaces can be created and renamed here, never deleted.`
 
 const STATUS_RANK: Record<TaskStatus, number> = { todo: 0, 'in-progress': 1, hold: 2, done: 3 }
 
@@ -45,6 +45,8 @@ const status = z.enum(TASK_STATUSES)
 const priority = z.enum(TASK_PRIORITIES)
 const tags = z.array(z.string().min(1)).describe('Free-form labels')
 const spaceRef = z.string().describe('Space name (case-insensitive) or id')
+const colourNames = Object.keys(SPACE_COLOUR_NAMES) as [SpaceColourName, ...SpaceColourName[]]
+const colour = z.enum(colourNames).describe(`Palette colour: ${colourNames.join(', ')}`)
 
 type Clock = () => Date
 
@@ -58,10 +60,15 @@ export function registerTools(server: McpServer, records: Records, clock: Clock 
     return spaces.sort((a, b) => a.order - b.order)
   }
 
-  const findSpace = (spaces: Space[], ref: string): Space | undefined => {
-    const wanted = ref.trim().toLowerCase()
-    return spaces.find((s) => s.id === ref) ?? spaces.find((s) => s.name.toLowerCase() === wanted)
+  const spaceNamed = (spaces: Space[], name: string): Space | undefined => {
+    const wanted = name.trim().toLowerCase()
+    return spaces.find((s) => s.name.toLowerCase() === wanted)
   }
+
+  const findSpace = (spaces: Space[], ref: string): Space | undefined =>
+    spaces.find((s) => s.id === ref) ?? spaceNamed(spaces, ref)
+
+  const spaceView = (s: Space) => ({ id: s.id, name: s.name, colour: colourName(s.colour) })
 
   const routineList = async (): Promise<Routine[]> => {
     const [routines, checkIns] = await Promise.all([records.routines(), records.checkIns()])
@@ -265,7 +272,66 @@ export function registerTools(server: McpServer, records: Records, clock: Clock 
       description: 'The Spaces Tasks can live in, in switcher order.',
       annotations: { readOnlyHint: true },
     },
-    async () => ok((await spaceList()).map((s) => ({ id: s.id, name: s.name, colour: s.colour }))),
+    async () => ok((await spaceList()).map(spaceView)),
+  )
+
+  server.registerTool(
+    'create_space',
+    {
+      title: 'Create Space',
+      description:
+        'Create a Space for Tasks to live in. Goes to the bottom of the switcher. If a Space of that name already exists it is returned as is, so it is safe to call before filing Tasks into it.',
+      inputSchema: {
+        name: z.string().min(1),
+        colour: colour.optional().describe('Defaults to the first palette colour no Space uses yet'),
+      },
+      annotations: { idempotentHint: true },
+    },
+    async ({ name, colour: chosen }) => {
+      const spaces = await spaceList()
+      const existing = spaceNamed(spaces, name)
+      if (existing) return ok({ ...spaceView(existing), alreadyExists: true })
+      const space: Space = {
+        id: nanoid(8),
+        name: name.trim(),
+        colour: chosen ? SPACE_COLOUR_NAMES[chosen] : nextFreeColour(spaces),
+        order: Math.max(...spaces.map((s) => s.order)) + 1,
+        updatedAt: now(),
+      }
+      await records.put([{ kind: 'space', id: space.id, updatedAt: space.updatedAt, deleted: false, data: space }])
+      return ok(spaceView(space))
+    },
+  )
+
+  server.registerTool(
+    'update_space',
+    {
+      title: 'Update Space',
+      description: 'Rename or recolour a Space. Spaces are never deleted from here; that stays in the app.',
+      inputSchema: {
+        space: spaceRef,
+        name: z.string().min(1).optional(),
+        colour: colour.optional(),
+      },
+      annotations: { destructiveHint: false, idempotentHint: true },
+    },
+    async ({ space: ref, name, colour: chosen }) => {
+      const spaces = await spaceList()
+      const space = findSpace(spaces, ref)
+      if (!space) return noSpace(ref, spaces)
+      if (name !== undefined) {
+        const clash = spaceNamed(spaces, name)
+        if (clash && clash.id !== space.id) return fail(`There is already a Space called "${clash.name}"`)
+      }
+      const next: Space = {
+        ...space,
+        ...(name !== undefined && { name: name.trim() }),
+        ...(chosen !== undefined && { colour: SPACE_COLOUR_NAMES[chosen] }),
+        updatedAt: now(),
+      }
+      await records.put([{ kind: 'space', id: next.id, updatedAt: next.updatedAt, deleted: false, data: next }])
+      return ok(spaceView(next))
+    },
   )
 
   server.registerTool(
@@ -343,6 +409,10 @@ function localDate(date: ISODate): Date {
   const [y, m, d] = date.split('-').map(Number)
   return new Date(y, m - 1, d)
 }
+
+/** The palette name for a hex colour, or the hex itself if it is off-palette. */
+const colourName = (hex: string): string =>
+  Object.entries(SPACE_COLOUR_NAMES).find(([, value]) => value === hex)?.[0] ?? hex
 
 const ok = (data: unknown): CallToolResult => ({ content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] })
 
