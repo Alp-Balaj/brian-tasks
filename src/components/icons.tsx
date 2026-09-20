@@ -26,7 +26,8 @@ export const HomeIcon = (p: IconProps) => <Svg d="M3 10.5 12 3l9 7.5V20a1 1 0 0 
 export const BoardIcon = (p: IconProps) => <Svg d="M4 4h4v16H4zM10 4h4v11h-4zM16 4h4v7h-4z" {...p} />
 export const ListIcon = (p: IconProps) => <Svg d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" {...p} />
 export const CalendarIcon = (p: IconProps) => <Svg d="M3 5h18v16H3zM3 10h18M8 3v4M16 3v4" {...p} />
-export const WeekIcon = (p: IconProps) => <Svg d="M3 4h18v16H3zM7 9h10M7 12h6M7 15h8" {...p} />
+/** A week: three day rows in a frame, each with a block at a different hour. */
+export const WeekIcon = (p: IconProps) => <Svg d="M3 4h18v16H3zM6 9h6M10 12.5h8M6 16h9" {...p} />
 export const ArchiveIcon = (p: IconProps) => <Svg d="M3 4h18v4H3zM4 8v12h16V8M10 12h4" {...p} />
 export const PlusIcon = (p: IconProps) => <Svg d="M12 5v14M5 12h14" {...p} />
 export const CheckIcon = (p: IconProps) => <Svg d="M5 12.5 10 17l9-10" {...p} />
