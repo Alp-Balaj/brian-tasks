@@ -28,11 +28,22 @@ import {
   type RoutineRecord,
 } from '../src/domain/routine.ts'
 import { homeSections } from '../src/domain/home.ts'
+import {
+  blocksOn,
+  currentBlock,
+  describeMinutes,
+  isTimed,
+  placementsIn,
+  placementsOn,
+  type Block,
+  type Minutes,
+  type Placement,
+} from '../src/domain/block.ts'
 import { toISODate } from '../src/lib/dates.ts'
 import type { Records } from './records.ts'
 
 export const INSTRUCTIONS = `Brian Tasks is a single-person task manager.
-Vocabulary: a Task has a Status (todo, in-progress, hold, done), a Priority (low, normal, high, urgent), optional Tags, an optional Due date (hard deadline) and Scheduled date (the day to work on it), and lives in exactly one Space (Personal, Work, ...). A Pinned Task shows on Home. Archived Tasks are hidden everywhere but the Archive. A Routine is something done repeatedly on a schedule; it is never finished, only checked in for a day.
+Vocabulary: a Task has a Status (todo, in-progress, hold, done), a Priority (low, normal, high, urgent), optional Tags, an optional Due date (hard deadline) and Scheduled date (the day to work on it), and lives in exactly one Space (Personal, Work, ...). A Pinned Task shows on Home. Archived Tasks are hidden everywhere but the Archive. A Routine is something done repeatedly on a schedule; it is never finished, only checked in for a day. A Block is a named, coloured span of one day on the Week page and a Placement is a Task put on a specific day, inside a Block and/or at an hour; \`today\` reports them, nothing here changes them.
 Dates are calendar dates, YYYY-MM-DD, in the user's local time. Start with \`today\` to see what matters right now. Tasks are never deleted from here: archive them instead. Spaces can be created and renamed here, never deleted.`
 
 const STATUS_RANK: Record<TaskStatus, number> = { todo: 0, 'in-progress': 1, hold: 2, done: 3 }
@@ -99,35 +110,92 @@ export function registerTools(server: McpServer, records: Records, clock: Clock 
     })
   }
 
-  const routineView = (r: Routine, date: ISODate) => ({
-    id: r.id,
-    title: r.title,
-    schedule: describeSchedule(r.schedule),
-    scheduledToday: isScheduledOn(r.schedule, localDate(date)),
-    done: r.checkIns.includes(date),
-    streak: currentStreak(r, localDate(date)),
-    ...(r.note && { note: r.note }),
-    ...(r.archived && { archived: true }),
-  })
+  /** `at`: the earliest Block on `date` that links the Routine (TB-20), when `blocks` are that day's. */
+  const routineView = (r: Routine, date: ISODate, blocks: Block[] = []) => {
+    const at = blocks.find((b) => b.routineIds.includes(r.id))
+    return {
+      id: r.id,
+      title: r.title,
+      schedule: describeSchedule(r.schedule),
+      scheduledToday: isScheduledOn(r.schedule, localDate(date)),
+      done: r.checkIns.includes(date),
+      streak: currentStreak(r, localDate(date)),
+      ...(r.note && { note: r.note }),
+      ...(r.archived && { archived: true }),
+      ...(at && { at: describeMinutes(at.start) }),
+    }
+  }
+
+  /**
+   * Today's Blocks and Placements as Home's strip shows them (TB-20, TB-23): the Blocks
+   * on `date` with their linked Routines and Tasks, then timed Placements outside any of
+   * those Blocks. A placed Task that is done or archived stays listed (TB-16).
+   */
+  const dayView = (
+    date: ISODate,
+    blocks: Block[],
+    placements: Placement[],
+    tasks: Task[],
+    routines: Routine[],
+    view: ReturnType<typeof taskView>,
+  ) => {
+    const byId = new Map(tasks.map((t) => [t.id, t]))
+    const titles = new Map(routines.map((r) => [r.id, r.title]))
+    const placed = (p: Placement) => {
+      const task = byId.get(p.taskId)
+      return task && { ...view(task), ...(isTimed(p) && { start: describeMinutes(p.start), end: describeMinutes(p.end) }) }
+    }
+    const inBlocks = new Set(blocks.map((b) => b.id))
+    return {
+      blocks: blocks.map((b) => ({
+        name: b.name,
+        start: describeMinutes(b.start),
+        end: describeMinutes(b.end),
+        routines: b.routineIds.map((id) => titles.get(id)).filter((t) => t !== undefined),
+        tasks: placementsIn(placements, b, date).map(placed).filter((t) => t !== undefined),
+      })),
+      placements: placementsOn(placements, date)
+        .filter((p) => isTimed(p) && (p.blockId === undefined || !inBlocks.has(p.blockId)))
+        .map(placed)
+        .filter((t) => t !== undefined),
+    }
+  }
+
+  /** Minutes since midnight on the server's clock, in its local time (ADR 0002: TZ decides). */
+  const nowMinutes = (): Minutes => {
+    const at = clock()
+    return at.getHours() * 60 + at.getMinutes()
+  }
 
   server.registerTool(
     'today',
     {
       title: 'Today',
       description:
-        "What Home shows: overdue Tasks, today's Routines with their Check-in state, Tasks due or scheduled today, Pinned Tasks, and Tasks in progress. Each Task appears once, in the first section it qualifies for. The right first call.",
+        "What Home shows: today's Blocks (with their linked Routines and placed Tasks), timed Placements outside them, the Block under way right now, overdue Tasks, today's Routines with their Check-in state, Tasks due or scheduled today, Pinned Tasks, and Tasks in progress. Each Task appears once in the sections, in the first it qualifies for. The right first call.",
       inputSchema: { date: isoDate.optional().describe('Defaults to today') },
       annotations: { readOnlyHint: true },
     },
     async ({ date = today() }) => {
-      const [tasks, spaces, routines] = await Promise.all([records.tasks(), spaceList(), routineList()])
+      const [tasks, spaces, routines, allBlocks, placements] = await Promise.all([
+        records.tasks(),
+        spaceList(),
+        routineList(),
+        records.blocks(),
+        records.placements(),
+      ])
       const view = taskView(spaces)
       const sections = homeSections(tasks, date)
+      const blocks = blocksOn(allBlocks, date)
+      // `now` needs the clock, so it only means something on the clock's today.
+      const current = date === today() ? currentBlock(allBlocks, date, nowMinutes()) : undefined
       return ok({
         date,
+        ...(date === today() && { now: current ? { name: current.name, until: describeMinutes(current.end) } : null }),
+        ...dayView(date, blocks, placements, tasks, routines, view),
         routines: routines
           .filter((r) => !r.archived && isScheduledOn(r.schedule, localDate(date)))
-          .map((r) => routineView(r, date)),
+          .map((r) => routineView(r, date, blocks)),
         overdue: sections.overdue.map((t) => view(t)),
         today: sections.today.map(({ task, reason }) => ({ ...view(task), reason })),
         pinned: sections.pinned.map((t) => view(t)),
