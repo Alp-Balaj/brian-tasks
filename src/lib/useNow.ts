@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { Minutes } from '../../domain/block'
+import type { Minutes } from '../domain/block'
 
 const minutesNow = (): Minutes => {
   const d = new Date()
@@ -7,10 +7,9 @@ const minutesNow = (): Minutes => {
 }
 
 /**
- * Local minutes since midnight, re-read every minute for the now-line and the "Now ·"
- * line. Sibling of `useToday`: both tick on the same cadence, so the strip's date and
- * its clock agree to within a minute. (P6 may fold this into a shared hook with the
- * Week page's `useNow`.)
+ * Minutes since local midnight, re-read every minute so the now-line on today's row
+ * and Home's "Now ·" line keep moving in an open tab. Sibling of `useToday`: both
+ * tick on the same cadence, so the date and the clock agree to within a minute.
  */
 export function useNow(): Minutes {
   const [now, setNow] = useState(minutesNow)

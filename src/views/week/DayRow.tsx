@@ -20,7 +20,7 @@ import { BlockBar } from './BlockBar'
 import { PlacementBar } from './PlacementBar'
 import { HatchLayer } from './HatchLayer'
 import { Tray } from './Tray'
-import { useNow } from './useNow'
+import { useNow } from '../../lib/useNow'
 import { ROW_GRID } from './layout'
 
 interface Props {

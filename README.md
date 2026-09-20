@@ -23,21 +23,24 @@ src/
   domain/task.ts        Task model, statuses, priorities. No UI/storage deps.
   domain/space.ts       Space model, DEFAULT_SPACE_ID ('personal'), ALL_SPACES, the colour palette, nextFreeColour.
   domain/routine.ts     Routine model + schedule/streak logic (isScheduledOn, currentStreak, ...).
-  store/repository.ts   Snapshot { tasks, spaces, routines, checkIns, tombstones } <-> localStorage.
-  store/migrate.ts      One-time v1 -> v2 -> v3 migrations.
+  domain/block.ts       Blocks (versioned weekly rules, ADR 0003) and Placements: weekOf, appliesTo, splitAt, blocksOn, unplacedOn, ...
+  store/repository.ts   Snapshot { tasks, spaces, routines, checkIns, blocks, placements, tombstones } <-> localStorage.
+  store/migrate.ts      One-time v1 -> v2 -> v3 -> v4 migrations.
   store/tasks.ts        Zustand store: add/update/remove/move/archive/restore/togglePin.
   store/spaces.ts       Spaces: add/update/reorder/remove (remove moves Tasks to Personal).
   store/routines.ts     Routines + Check-in records; `routine.checkIns` is derived from the records.
+  store/blocks.ts       Blocks + Placements: updateBlockFrom splits at the week (TB-5); Task.scheduled follows the earliest placement.
   store/tombstones.ts   Deletions not yet told to the server.
   store/ui.ts           Space switcher selection + last-used Space, persisted under brian-tasks:ui.
   store/selectors.ts    useVisibleTasks (non-archived, obeys switcher), archivedTasks.
   sync/merge.ts         The sync model: rows keyed (kind, id), newest updatedAt wins. Pure, tested.
   sync/engine.ts        When to sync and how the result lands in the stores.
   sync/client.ts        The HTTP calls.
-  components/           Shell, Sheet, QuickAdd, TaskEditor, TaskCard, TaskRow, StatusMenu, SpaceSwitcher,
+  components/           Shell, Sheet, QuickAdd, TaskEditor, BlockSheet, PlacementSheet, TaskPicker, TaskCard, TaskRow, StatusMenu, SpaceSwitcher,
                         ManageSpaces, RoutineEditor, RoutineRow, LoginScreen, SyncBadge.
   components/ui.tsx     Shared controls (CircleCheck, Segmented, Chip, Button…); icons.tsx the inline SVG icons.
-  views/home/           Landing page: Overdue · Routines · Today · Pinned · In progress, across all Spaces.
+  views/home/           Landing page: today's strip of Blocks and Placements, then Today · Overdue · Routines · Pinned · In progress.
+  views/week/           Week page: seven day rows 00–24 with Blocks, Placements, hatched overlaps and the unplaced tray per day.
   views/board/          Kanban (dnd-kit). Drag between/within status columns.
   views/list/           Flat list: search, status filter, sort, checkbox to complete.
   views/calendar/       Month grid; tasks appear on `due` / `scheduled`. Day agenda on mobile.
