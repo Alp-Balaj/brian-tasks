@@ -1,6 +1,7 @@
 import type { Task } from '../../domain/task'
 import { describeSpan, type Block } from '../../domain/block'
 import { spanStyle } from './layout'
+import type { BarDrag } from './useRulerDrag'
 
 interface Props {
   block: Block
@@ -9,6 +10,8 @@ interface Props {
   /** Home's strip never writes titles inside the bar (TB-21). */
   badgeOnly?: boolean
   onOpen: () => void
+  /** Desktop only (TB-22): the body moves, the edges resize. Absent on a phone. */
+  drag?: BarDrag
 }
 
 /**
@@ -17,7 +20,7 @@ interface Props {
  * needs no measuring): the name from 56px, and for linked untimed tasks their
  * titles from 120px, a count badge otherwise (TB-21). Hover shows the full text.
  */
-export function BlockBar({ block, tasks, badgeOnly = false, onOpen }: Props) {
+export function BlockBar({ block, tasks, badgeOnly = false, onOpen, drag }: Props) {
   const titles = tasks.map((t) => t.title).join(', ')
   const count = tasks.length
   const label = `${block.name} · ${describeSpan(block.start, block.end)}`
@@ -25,6 +28,7 @@ export function BlockBar({ block, tasks, badgeOnly = false, onOpen }: Props) {
     <button
       type="button"
       onClick={onOpen}
+      onPointerDown={drag?.onPointerDown}
       title={count > 0 ? `${label} · ${titles}` : label}
       aria-label={label}
       className="@container absolute inset-y-0 z-10 overflow-hidden rounded-md text-left text-white hover:brightness-110 focus-visible:ring-2 focus-visible:ring-accent focus-visible:outline-none"
@@ -44,6 +48,21 @@ export function BlockBar({ block, tasks, badgeOnly = false, onOpen }: Props) {
         >
           {count}
         </span>
+      )}
+      {/* 6px resize handles (§5.8); a bar too narrow for both is move-only. */}
+      {drag && (
+        <>
+          <span
+            aria-hidden
+            onPointerDown={(e) => drag.onHandlePointerDown('start', e)}
+            className="absolute inset-y-0 left-0 hidden w-1.5 cursor-ew-resize @min-[24px]:block"
+          />
+          <span
+            aria-hidden
+            onPointerDown={(e) => drag.onHandlePointerDown('end', e)}
+            className="absolute inset-y-0 right-0 hidden w-1.5 cursor-ew-resize @min-[24px]:block"
+          />
+        </>
       )}
     </button>
   )
