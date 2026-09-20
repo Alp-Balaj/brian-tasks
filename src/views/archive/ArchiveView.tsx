@@ -8,6 +8,8 @@ import { useSpaces } from '../../store/spaces'
 import { useSpaceSelection } from '../../store/ui'
 import { archivedTasks } from '../../store/selectors'
 import { ArchiveRow } from './ArchiveRow'
+import { RowGroup } from '../../components/TaskRow'
+import { SectionLabel } from '../../components/ui'
 
 const WEEKDAY_SHORT: Record<Weekday, string> = { 0: 'Sun', 1: 'Mon', 2: 'Tue', 3: 'Wed', 4: 'Thu', 5: 'Fri', 6: 'Sat' }
 
@@ -49,14 +51,14 @@ export function ArchiveView() {
   }
 
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-4 p-3">
-      <h1 className="text-lg font-semibold">Archive</h1>
+    <div className="mx-auto flex max-w-3xl flex-col gap-6 p-4 pb-24 md:pb-4">
+      <h1 className="px-1 text-2xl font-semibold tracking-tight">Archive</h1>
 
-      <section className="flex flex-col gap-2">
-        <h2 className="text-sm font-medium text-neutral-500">Tasks</h2>
-        <ul className="divide-y divide-neutral-200 rounded-lg border border-neutral-200 bg-white">
+      <section className="flex flex-col gap-1.5">
+        <SectionLabel className="px-1">Tasks</SectionLabel>
+        <RowGroup>
           {archived.length === 0 && (
-            <li className="p-6 text-center text-sm text-neutral-400">
+            <li className="p-8 text-center text-sm text-fg-faint">
               {showDot ? 'No archived tasks.' : 'No archived tasks in this space.'}
             </li>
           )}
@@ -73,14 +75,14 @@ export function ArchiveView() {
               />
             )
           })}
-        </ul>
+        </RowGroup>
       </section>
 
-      <section className="flex flex-col gap-2">
-        <h2 className="text-sm font-medium text-neutral-500">Routines</h2>
-        <ul className="divide-y divide-neutral-200 rounded-lg border border-neutral-200 bg-white">
+      <section className="flex flex-col gap-1.5">
+        <SectionLabel className="px-1">Routines</SectionLabel>
+        <RowGroup>
           {archivedRoutines.length === 0 && (
-            <li className="p-6 text-center text-sm text-neutral-400">No archived routines.</li>
+            <li className="p-8 text-center text-sm text-fg-faint">No archived routines.</li>
           )}
           {archivedRoutines.map((r) => (
             <ArchiveRow
@@ -91,7 +93,7 @@ export function ArchiveView() {
               onDelete={() => confirmDelete('routine', r.title, () => removeRoutine(r.id))}
             />
           ))}
-        </ul>
+        </RowGroup>
       </section>
     </div>
   )

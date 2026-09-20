@@ -25,6 +25,10 @@ _Avoid_: Deadline
 The day you intend to work on a Task. Not a commitment to finish it.
 _Avoid_: Planned
 
+**Overdue**:
+A Task whose Due date has passed and which is not done. The first thing Home shows.
+_Avoid_: Late, missed (reserved for Routines)
+
 **Tag**:
 A free-form, cross-cutting label. A Task can carry any number; Tags never determine where a Task lives.
 _Avoid_: Label, category
@@ -77,7 +81,7 @@ The current calendar day in local time, rolling over at midnight.
 ### Home
 
 **Home**:
-The landing page. Shows only Today's Routines and the few Tasks that matter right now, across all Spaces.
+The landing page. Shows only Today's Routines and the few Tasks that matter right now, across all Spaces: Overdue first, then what is due or Scheduled Today, then Pinned, then in progress. A Task appears once, in the first of those it qualifies for.
 _Avoid_: Dashboard, overview, today view
 
 ### Archive

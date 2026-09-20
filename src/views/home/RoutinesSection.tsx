@@ -1,33 +1,23 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useRoutines } from '../../store/routines'
-import { isScheduledOn } from '../../domain/routine'
-import { toISODate } from '../../lib/dates'
+import { hasCheckIn, isScheduledOn } from '../../domain/routine'
+import type { ISODate } from '../../domain/task'
 import { RoutineRow } from '../../components/RoutineRow'
 import { RoutineEditor } from '../../components/RoutineEditor'
+import { RowGroup } from '../../components/TaskRow'
+import { SectionLabel } from '../../components/ui'
+import { PlusIcon } from '../../components/icons'
 
-/** Today's ISODate, re-evaluated every minute so an open Home rolls over at midnight (Q11). */
-function useToday() {
-  const [today, setToday] = useState(() => toISODate(new Date()))
-  useEffect(() => {
-    const id = setInterval(() => {
-      const now = toISODate(new Date())
-      setToday((prev) => (prev === now ? prev : now))
-    }, 60_000)
-    return () => clearInterval(id)
-  }, [])
-  return today
-}
-
-/** "Routines · today": one row per non-archived Routine scheduled today (Q10, Q21, Q23). */
-export function RoutinesSection() {
+/** "Routines": one row per non-archived Routine scheduled today, with today's tally (Q10, Q21, Q23). */
+export function RoutinesSection({ today }: { today: ISODate }) {
   const routines = useRoutines((s) => s.routines)
-  const today = useToday()
   // `null` = creating; a string = editing that routine; undefined = closed.
   const [editing, setEditing] = useState<string | null | undefined>(undefined)
 
   const todayDate = new Date(`${today}T12:00:00`)
   const active = routines.filter((r) => !r.archived)
   const scheduled = active.filter((r) => isScheduledOn(r.schedule, todayDate))
+  const done = scheduled.filter((r) => hasCheckIn(r, today)).length
 
   // Q24 hides empty sections, but Q21 makes this section the only place a Routine can be
   // created — at zero Routines those can't both hold, or the first one could never exist.
@@ -36,28 +26,34 @@ export function RoutinesSection() {
   const addButton = (
     <button
       onClick={() => setEditing(null)}
-      className="rounded-md px-2 py-1 text-xs text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900"
+      className="inline-flex min-h-8 items-center gap-1 rounded-full px-2 text-xs font-medium text-fg-muted hover:bg-surface-2 hover:text-fg"
     >
-      + routine
+      <PlusIcon size={14} />
+      routine
     </button>
   )
 
   return (
-    <section className="flex flex-col gap-2">
+    <section className="flex flex-col gap-1.5">
       {scheduled.length > 0 ? (
         <>
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-medium text-neutral-500">Routines · today</h2>
+          <div className="flex items-center justify-between px-1">
+            <SectionLabel className="flex items-baseline gap-2">
+              Routines
+              <span className={`font-normal ${done === scheduled.length ? 'text-success' : 'text-fg-faint'}`}>
+                {done}/{scheduled.length}
+              </span>
+            </SectionLabel>
             {addButton}
           </div>
-          <div className="flex flex-col gap-1.5">
+          <RowGroup>
             {scheduled.map((r) => (
               <RoutineRow key={r.id} routine={r} today={today} todayDate={todayDate} onOpen={() => setEditing(r.id)} />
             ))}
-          </div>
+          </RowGroup>
         </>
       ) : (
-        <div className="flex items-center justify-between text-xs text-neutral-400">
+        <div className="flex items-center justify-between px-1 text-xs text-fg-faint">
           <span>{active.length > 0 ? 'No routines today.' : ''}</span>
           {addButton}
         </div>

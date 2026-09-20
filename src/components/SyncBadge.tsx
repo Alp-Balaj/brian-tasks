@@ -13,13 +13,13 @@ const LABEL = {
 /** One line in the sidebar: where this Device stands with the server, and a way out. */
 export function SyncBadge() {
   const { status, error } = useSync()
-  const tone = status === 'error' ? 'text-red-600' : status === 'offline' ? 'text-amber-600' : 'text-neutral-500'
+  const tone = status === 'error' ? 'text-danger' : status === 'offline' ? 'text-warn' : 'text-fg-faint'
   return (
     <div className={`flex items-center gap-3 px-2 text-xs ${tone}`} title={error}>
       <button onClick={() => void sync()} className="hover:underline">
         {LABEL[status]}
       </button>
-      <button onClick={() => void logout()} className="ml-auto text-neutral-400 hover:underline">
+      <button onClick={() => void logout()} className="ml-auto text-fg-faint hover:underline">
         Sign out
       </button>
     </div>

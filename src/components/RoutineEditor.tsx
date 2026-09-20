@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useRoutines } from '../store/routines'
 import { Sheet } from './Sheet'
+import { Button, SectionLabel, field } from './ui'
 import {
   WEEKDAYS_MONDAY_FIRST,
   WEEKDAY_SHORT,
@@ -17,7 +18,6 @@ interface Props {
   onClose: () => void
 }
 
-const field = 'w-full rounded-md border border-neutral-300 px-3 py-2 text-sm outline-none focus:border-neutral-900'
 
 const EMPTY_DRAFT: NewRoutine = { title: '', schedule: { kind: 'daily' }, note: '' }
 
@@ -48,27 +48,60 @@ export function RoutineEditor({ routineId, onClose }: Props) {
   }
 
   return (
-    <Sheet onClose={onClose}>
+    <Sheet
+      onClose={onClose}
+      title={isNew ? 'New routine' : 'Routine'}
+      footer={
+        isNew ? (
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button type="submit" form="routine-form" disabled={!draft.title.trim()}>
+              Add
+            </Button>
+          </div>
+        ) : (
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-fg-faint">
+              {routine!.checkIns.length} check-in{routine!.checkIns.length === 1 ? '' : 's'} · since{' '}
+              {routine!.createdAt.slice(0, 10)}
+            </span>
+            {/* Permanent delete lives only on the Archive page (Q28). */}
+            <Button
+              variant="ghost"
+              onClick={() => {
+                archive(routineId)
+                onClose()
+              }}
+            >
+              Archive
+            </Button>
+          </div>
+        )
+      }
+    >
       <form
+        id="routine-form"
         onSubmit={(e) => {
           e.preventDefault()
           if (isNew) submit()
         }}
-        className="flex flex-col gap-4"
+        className="flex flex-col gap-5"
       >
-        {isNew && <label className="text-sm font-medium">New routine</label>}
         <input
           autoFocus={isNew}
           value={value.title}
           onChange={(e) => set({ title: e.target.value })}
           placeholder="Read 20 pages"
-          className={isNew ? `${field} text-base` : 'text-lg font-semibold outline-none'}
+          aria-label="Title"
+          className={isNew ? `${field} min-h-12 text-lg` : 'w-full bg-transparent text-xl font-semibold outline-none placeholder:text-fg-faint'}
         />
 
         <ScheduleField value={value.schedule} onChange={(schedule) => set({ schedule })} />
 
-        <label className="flex flex-col gap-1 text-xs text-neutral-500">
-          Note
+        <label className="flex flex-col gap-2">
+          <SectionLabel>Note</SectionLabel>
           <input
             value={value.note}
             onChange={(e) => set({ note: e.target.value })}
@@ -77,38 +110,6 @@ export function RoutineEditor({ routineId, onClose }: Props) {
           />
         </label>
 
-        {isNew ? (
-          <div className="flex justify-end gap-2">
-            <button type="button" onClick={onClose} className="rounded-md px-3 py-2 text-sm hover:bg-neutral-100">
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={!draft.title.trim()}
-              className="rounded-md bg-neutral-900 px-3 py-2 text-sm text-white disabled:opacity-40"
-            >
-              Add
-            </button>
-          </div>
-        ) : (
-          <div className="mt-2 flex items-center justify-between text-xs text-neutral-400">
-            <span>
-              {routine!.checkIns.length} check-in{routine!.checkIns.length === 1 ? '' : 's'} · since{' '}
-              {routine!.createdAt.slice(0, 10)}
-            </span>
-            {/* Permanent delete lives only on the Archive page (Q28). */}
-            <button
-              type="button"
-              onClick={() => {
-                archive(routineId)
-                onClose()
-              }}
-              className="rounded-md px-2 py-1 text-neutral-600 hover:bg-neutral-100"
-            >
-              Archive
-            </button>
-          </div>
-        )}
       </form>
     </Sheet>
   )
@@ -127,12 +128,12 @@ function ScheduleField({ value, onChange }: { value: Schedule; onChange: (s: Sch
   }
 
   const segment = (active: boolean) =>
-    `flex-1 rounded-md px-3 py-1.5 text-sm ${active ? 'bg-neutral-900 text-white' : 'hover:bg-neutral-100'}`
+    `min-h-9 flex-1 rounded-lg px-3 text-sm ${active ? 'bg-fg text-bg' : 'text-fg-muted hover:bg-surface-2'}`
 
   return (
-    <div className="flex flex-col gap-2 text-xs text-neutral-500">
-      Schedule
-      <div className="flex gap-1 rounded-md border border-neutral-300 p-1">
+    <div className="flex flex-col gap-2">
+      <SectionLabel>Schedule</SectionLabel>
+      <div className="flex gap-1 rounded-xl bg-surface-2 p-1">
         <button type="button" onClick={() => onChange({ kind: 'daily' })} className={segment(daily)}>
           Every day
         </button>
@@ -154,8 +155,8 @@ function ScheduleField({ value, onChange }: { value: Schedule; onChange: (s: Sch
                 type="button"
                 onClick={() => toggleDay(d)}
                 aria-pressed={on}
-                className={`flex-1 rounded-md border py-1.5 text-xs ${
-                  on ? 'border-neutral-900 bg-neutral-900 text-white' : 'border-neutral-300 text-neutral-600 hover:bg-neutral-100'
+                className={`min-h-10 flex-1 rounded-lg border text-xs font-medium ${
+                  on ? 'border-fg bg-fg text-bg' : 'border-line-strong text-fg-muted hover:bg-surface-2'
                 }`}
               >
                 {WEEKDAY_SHORT[d]}
@@ -164,7 +165,7 @@ function ScheduleField({ value, onChange }: { value: Schedule; onChange: (s: Sch
           })}
         </div>
       )}
-      {!daily && days.length === 0 && <span className="text-neutral-400">Never scheduled — pick at least one day.</span>}
+      {!daily && days.length === 0 && <span className="text-xs text-fg-faint">Never scheduled — pick at least one day.</span>}
     </div>
   )
 }

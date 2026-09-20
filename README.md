@@ -14,7 +14,7 @@ npm test           # vitest (domain logic, sync merge)
 npm run lint       # oxlint
 ```
 
-The app runs without the server (everything works from local storage; the badge shows "Offline"). `API_PROXY=https://brian-tasks-production.up.railway.app npm run dev` proxies `/api` to production instead, which signs the localhost tab in against the real server — handy to seed it from a browser that already holds data.
+The app runs without the server (everything works from local storage; the badge shows "Offline"). `npm link` puts the `brian` CLI on your PATH (see below). `API_PROXY=https://brian-tasks-production.up.railway.app npm run dev` proxies `/api` to production instead, which signs the localhost tab in against the real server — handy to seed it from a browser that already holds data.
 
 ## Layout
 
@@ -34,21 +34,28 @@ src/
   sync/merge.ts         The sync model: rows keyed (kind, id), newest updatedAt wins. Pure, tested.
   sync/engine.ts        When to sync and how the result lands in the stores.
   sync/client.ts        The HTTP calls.
-  components/           Shell, Sheet, QuickAdd, TaskEditor, TaskCard, SpaceSwitcher, ManageSpaces,
-                        RoutineEditor, RoutineRow, LoginScreen, SyncBadge.
-  views/home/           Landing page: Routines · Pinned · Today · In progress, across all Spaces.
+  components/           Shell, Sheet, QuickAdd, TaskEditor, TaskCard, TaskRow, StatusMenu, SpaceSwitcher,
+                        ManageSpaces, RoutineEditor, RoutineRow, LoginScreen, SyncBadge.
+  components/ui.tsx     Shared controls (CircleCheck, Segmented, Chip, Button…); icons.tsx the inline SVG icons.
+  views/home/           Landing page: Overdue · Routines · Today · Pinned · In progress, across all Spaces.
   views/board/          Kanban (dnd-kit). Drag between/within status columns.
   views/list/           Flat list: search, status filter, sort, checkbox to complete.
   views/calendar/       Month grid; tasks appear on `due` / `scheduled`. Day agenda on mobile.
   views/archive/        Archived Tasks (obeys the switcher) and Routines; Restore / Delete.
-  lib/dates.ts          date-fns helpers.
+  domain/home.ts        What Home shows: overdue / today (due, scheduled) / pinned / in progress, each Task once. Pure.
+  lib/dates.ts          date-fns helpers; lib/useToday.ts the midnight-rollover hook.
+  index.css             Colour tokens (light + dark via prefers-color-scheme); components only name roles.
 server/index.ts       Hono server: serves dist/ and the /api routes. Node 24 runs the .ts directly.
 server/db.ts          One Postgres table of synced rows; the same newest-wins rule as sync/merge.ts.
 server/auth.ts        One shared password -> signed HttpOnly cookie (1 year). Login attempts throttled.
+server/mcp.ts         POST /api/mcp: the MCP endpoint Claude and the CLI use. Token-guarded, stateless.
+server/tools.ts       The MCP tools (today, list/get/create/update task, spaces, routines, check-in).
+server/records.ts     The server's typed view of the rows, for the tools. Writes obey the sync rule.
+cli/brian.ts          `brian`: the same tools from a terminal, as an MCP client of /api/mcp.
 scripts/import-obsidian.mjs  Vault TaskNotes -> dev/seed.json (dev first run only; never shipped).
 ```
 
-Terminology (Space, Routine, Check-in, Device, ...) is defined in `CONTEXT.md`; `docs/adr/` records the decisions behind the shape; `PLAN.md` records how the work was split across sessions.
+Terminology (Space, Routine, Check-in, Device, ...) is defined in `CONTEXT.md`; `docs/adr/` records the decisions behind the shape; `docs/research/` holds background reading (e.g. how other task apps do phones); `PLAN.md` records how the work was split across sessions.
 
 ## Data
 
@@ -64,6 +71,34 @@ For `npm run dev` on an empty browser, the app loads `dev/seed.json` if present.
 node scripts/import-obsidian.mjs "/home/alpi/Documents/Brian the brain/1 - Managing Brian/Tasks"
 ```
 
+## Talking to Brian from Claude
+
+The server exposes the app as an MCP server at `https://<host>/api/mcp`, so Claude Code, Claude Cowork, claude.ai and the `brian` CLI can read what is on today and create or change Tasks. Writes land in the same rows table under the same newest-wins rule as a Device's sync, so every Device sees them on its next catch-up (about a minute while open, immediately on open). Tools: `today`, `list_tasks`, `get_task`, `create_task`, `update_task`, `list_spaces`, `list_routines`, `check_in`, `uncheck`. There is no delete: archive instead.
+
+One long random token guards it (`MCP_TOKEN`; `railway variables --set MCP_TOKEN=...`). It is accepted as `Authorization: Bearer <token>`, or as the last path segment (`/api/mcp/<token>`) for connector UIs that cannot set headers. Wrong tokens are throttled per address, sharing the login throttle. `TZ` decides what "today" means for the tools.
+
+```sh
+# Claude Code
+claude mcp add --transport http brian https://<host>/api/mcp --header "Authorization: Bearer <token>"
+
+# claude.ai / Cowork: Customize > Connectors > Add custom connector
+#   URL  https://<host>/api/mcp    Authentication: No sign-in
+#   Request headers: Authorization = "Bearer <token>"   (if your plan shows that section)
+#   – or –  URL  https://<host>/api/mcp/<token>          (if it does not)
+
+# Terminal
+npm link                                           # once; puts `brian` on PATH
+brian config https://<host> <token>                # or BRIAN_URL / BRIAN_TOKEN
+brian today
+brian add Renew passport --due 2026-10-01 --space Personal --priority high --pin
+brian ls --space work --status open
+brian done <id>
+brian check "Read 20 pages"
+brian --help
+```
+
+The tools and the app build Tasks with the same functions (`domain/task.ts`: `buildTask`, `applyPatch`), so a Task made from a chat is indistinguishable from one made in Quick Add. `docs/adr/0002` has the reasoning.
+
 ## Deploy
 
 Hosted on Railway (region `europe-west4`) as one service built from the `Dockerfile`, plus a Railway Postgres. Every push to `master` on GitHub deploys. `railway.json` holds the build/health-check settings.
@@ -75,6 +110,8 @@ Service variables:
 | `DATABASE_URL`   | Reference to the Postgres service (`${{Postgres.DATABASE_URL}}`) |
 | `APP_PASSWORD`   | The one password the login screen accepts            |
 | `SESSION_SECRET` | Signs the session cookie; rotating it signs every Device out |
+| `MCP_TOKEN`      | What Claude and the `brian` CLI present at `/api/mcp`; rotating it disconnects them |
+| `TZ`             | The tools' idea of "today" (e.g. `Europe/Amsterdam`)   |
 | `PORT`           | Set by Railway                                       |
 
 Useful commands: `railway logs`, `railway variables`, `railway run npm run server` (local server with production variables), `railway open`.

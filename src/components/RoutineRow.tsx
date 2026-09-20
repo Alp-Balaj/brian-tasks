@@ -1,6 +1,7 @@
 import { useRoutines } from '../store/routines'
 import { currentStreak, hasCheckIn, type Routine } from '../domain/routine'
 import type { ISODate } from '../domain/task'
+import { CircleCheck } from './ui'
 
 interface Props {
   routine: Routine
@@ -10,7 +11,7 @@ interface Props {
   onOpen: () => void
 }
 
-/** One Routine on Home: today's Check-in checkbox, title, note, streak badge. */
+/** One Routine on Home: today's Check-in control, title, note, streak. */
 export function RoutineRow({ routine, today, todayDate, onOpen }: Props) {
   const checkIn = useRoutines((s) => s.checkIn)
   const uncheck = useRoutines((s) => s.uncheck)
@@ -18,29 +19,29 @@ export function RoutineRow({ routine, today, todayDate, onOpen }: Props) {
   const streak = currentStreak(routine, todayDate)
 
   return (
-    <div className="flex items-center gap-3 rounded-md border border-neutral-200 bg-white px-3 py-2">
+    <li className="flex min-h-14 items-center gap-1 pr-3 pl-1">
       {/* Only today can be checked or unchecked here — there is no back-fill UI (Q22). */}
-      <input
-        type="checkbox"
+      <CircleCheck
         checked={done}
-        onChange={(e) => (e.target.checked ? checkIn(routine.id, today) : uncheck(routine.id, today))}
-        aria-label={`${routine.title} done today`}
-        className="h-4 w-4 shrink-0"
+        onChange={(next) => (next ? checkIn(routine.id, today) : uncheck(routine.id, today))}
+        label={`${routine.title} done today`}
+        tone="success"
+        size="lg"
       />
-      <button onClick={onOpen} className="min-w-0 flex-1 text-left">
-        <div className={`truncate text-sm ${done ? 'text-neutral-400' : ''}`}>{routine.title}</div>
-        {routine.note && <div className="truncate text-xs text-neutral-500">{routine.note}</div>}
+      <button onClick={onOpen} className="flex min-w-0 flex-1 flex-col justify-center py-2 text-left">
+        <span className={`truncate text-[15px] leading-snug ${done ? 'text-fg-faint' : 'text-fg'}`}>{routine.title}</span>
+        {routine.note && <span className="truncate text-xs text-fg-muted">{routine.note}</span>}
       </button>
       {streak > 0 && (
         <span
           title={`${streak}-day streak`}
-          className={`shrink-0 rounded px-1.5 py-0.5 text-xs tabular-nums ${
-            done ? 'bg-neutral-900 text-white' : 'bg-neutral-100 text-neutral-600'
+          className={`shrink-0 rounded-md px-1.5 py-0.5 text-xs font-medium tabular-nums ${
+            done ? 'bg-success-soft text-success' : 'bg-surface-2 text-fg-muted'
           }`}
         >
-          ▲ {streak}
+          {streak}d
         </span>
       )}
-    </div>
+    </li>
   )
 }

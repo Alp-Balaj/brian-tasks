@@ -1,10 +1,98 @@
 @import "tailwindcss";
 
+/*
+ * Colour tokens. Components only ever name a role (bg, surface, fg, accent…), never a
+ * palette value, so light and dark are the same markup. Warm-tinted neutrals with one
+ * accent; colour otherwise only carries meaning (overdue, due today, done, priority).
+ */
+:root {
+  color-scheme: light dark;
+
+  --bg: oklch(97.5% 0.004 80);
+  --surface: oklch(100% 0 0);
+  --surface-2: oklch(95% 0.005 80);
+  --surface-3: oklch(91% 0.007 80);
+  --line: oklch(90% 0.006 80);
+  --line-strong: oklch(80% 0.009 80);
+
+  --fg: oklch(22% 0.01 60);
+  --fg-muted: oklch(50% 0.012 60);
+  --fg-faint: oklch(66% 0.01 60);
+
+  --accent: oklch(52% 0.17 255);
+  --accent-fg: oklch(100% 0 0);
+  --accent-soft: oklch(94% 0.03 255);
+
+  --danger: oklch(55% 0.19 25);
+  --danger-soft: oklch(95% 0.03 25);
+  --warn: oklch(62% 0.15 65);
+  --warn-soft: oklch(95% 0.05 85);
+  --success: oklch(56% 0.14 155);
+  --success-soft: oklch(94% 0.05 155);
+}
+
+/* Dark: darker base, lighter the more raised a surface is (not inverted greys). */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: oklch(17% 0.006 60);
+    --surface: oklch(22% 0.007 60);
+    --surface-2: oklch(27% 0.008 60);
+    --surface-3: oklch(32% 0.009 60);
+    --line: oklch(29% 0.008 60);
+    --line-strong: oklch(40% 0.01 60);
+
+    --fg: oklch(93% 0.005 80);
+    --fg-muted: oklch(70% 0.01 80);
+    --fg-faint: oklch(52% 0.01 80);
+
+    --accent: oklch(74% 0.13 255);
+    --accent-fg: oklch(18% 0.03 255);
+    --accent-soft: oklch(30% 0.06 255);
+
+    --danger: oklch(72% 0.16 25);
+    --danger-soft: oklch(30% 0.07 25);
+    --warn: oklch(80% 0.13 75);
+    --warn-soft: oklch(32% 0.06 80);
+    --success: oklch(75% 0.14 155);
+    --success-soft: oklch(30% 0.06 155);
+  }
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-fg: var(--fg);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-faint: var(--fg-faint);
+  --color-accent: var(--accent);
+  --color-accent-fg: var(--accent-fg);
+  --color-accent-soft: var(--accent-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+
+  /* Mobile chrome: bottom tab bar height, used by the shell, the FAB and page padding. */
+  --spacing-tabbar: 3.5rem;
+}
+
 html, body, #root {
   height: 100%;
 }
 
 body {
-  @apply bg-neutral-50 text-neutral-900 antialiased;
+  @apply bg-bg text-fg antialiased;
   overscroll-behavior-y: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Native controls pick up the accent (checkboxes in the editor, date pickers). */
+input, select, textarea, button {
+  accent-color: var(--accent);
 }

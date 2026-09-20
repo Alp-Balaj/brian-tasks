@@ -3,11 +3,12 @@ import { DEFAULT_SPACE_ID, SPACE_COLOURS, type Space } from '../domain/space'
 import { useSpaces } from '../store/spaces'
 import { Sheet } from './Sheet'
 import { SpaceDot } from './TaskCard'
+import { Button } from './ui'
 
 const field =
-  'min-w-0 flex-1 rounded-md border border-neutral-300 px-2 py-1.5 text-sm outline-none focus:border-neutral-900'
+  'min-w-0 flex-1 rounded-xl border border-line-strong bg-surface px-3 min-h-10 text-base outline-none focus:border-accent md:text-sm'
 const iconButton =
-  'rounded px-1.5 py-0.5 text-neutral-500 hover:bg-neutral-100 disabled:opacity-30 disabled:hover:bg-transparent'
+  'grid h-10 w-10 place-items-center rounded-full text-fg-muted hover:bg-surface-2 hover:text-fg disabled:opacity-30 disabled:hover:bg-transparent'
 
 /** First palette colour no Space uses yet, so new Spaces stay tellable apart by default. */
 const nextFreeColour = (spaces: Space[]) =>
@@ -49,11 +50,10 @@ export function ManageSpaces({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <Sheet onClose={onClose}>
+    <Sheet onClose={onClose} title="Spaces" size="sm">
       <div className="flex flex-col gap-4">
-        <div className="text-lg font-semibold">Spaces</div>
 
-        <ul className="divide-y divide-neutral-200 rounded-lg border border-neutral-200">
+        <ul className="divide-y divide-line rounded-2xl bg-surface-2/60">
           {spaces.map((space, i) => (
             <SpaceRow
               key={space.id}
@@ -74,25 +74,16 @@ export function ManageSpaces({ onClose }: { onClose: () => void }) {
           }}
           className="flex flex-col gap-2"
         >
-          <label className="text-xs text-neutral-500">New space</label>
+          <label className="text-xs font-semibold uppercase tracking-wide text-fg-muted">New space</label>
           <div className="flex items-center gap-2">
             <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Work" className={field} />
-            <button
-              type="submit"
-              disabled={!name.trim()}
-              className="rounded-md bg-neutral-900 px-3 py-1.5 text-sm text-white disabled:opacity-40"
-            >
+            <Button type="submit" disabled={!name.trim()} className="min-h-10">
               Add
-            </button>
+            </Button>
           </div>
           <ColourPicker value={colour} onChange={setColour} />
         </form>
 
-        <div className="flex justify-end">
-          <button onClick={onClose} className="rounded-md px-3 py-2 text-sm hover:bg-neutral-100">
-            Done
-          </button>
-        </div>
       </div>
     </Sheet>
   )
@@ -121,7 +112,7 @@ function SpaceRow({
           type="button"
           onClick={() => setPicking((p) => !p)}
           title="Change colour"
-          className="grid h-7 w-7 shrink-0 place-items-center rounded hover:bg-neutral-100"
+          className="grid h-10 w-10 shrink-0 place-items-center rounded-full hover:bg-surface-2"
         >
           <SpaceDot colour={space.colour} className="h-3 w-3" />
         </button>
@@ -137,13 +128,13 @@ function SpaceRow({
           onClick={onDelete}
           disabled={!onDelete}
           title={onDelete ? 'Delete space' : 'The default space cannot be deleted'}
-          className={`${iconButton} hover:text-red-600`}
+          className={`${iconButton} hover:text-danger`}
         >
           ×
         </button>
       </div>
       {picking && (
-        <div className="pl-9">
+        <div className="pl-12">
           <ColourPicker
             value={space.colour}
             onChange={(c) => {
@@ -187,7 +178,7 @@ function ColourPicker({ value, onChange }: { value: string; onChange: (colour: s
           role="radio"
           aria-checked={c === value}
           onClick={() => onChange(c)}
-          className={`h-6 w-6 rounded-full ring-offset-2 ${c === value ? 'ring-2 ring-neutral-900' : 'hover:ring-2 hover:ring-neutral-300'}`}
+          className={`h-8 w-8 rounded-full ring-offset-2 ring-offset-surface ${c === value ? 'ring-2 ring-fg' : 'hover:ring-2 hover:ring-line-strong'}`}
           style={{ backgroundColor: c }}
         />
       ))}

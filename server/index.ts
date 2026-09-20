@@ -4,6 +4,8 @@ import { Hono } from 'hono'
 import { serve } from '@hono/node-server'
 import { serveStatic } from '@hono/node-server/serve-static'
 import { migrate, pool, sync, type Row } from './db.ts'
+import { mcpApp } from './mcp.ts'
+import { pgRecords } from './records.ts'
 import {
   clearFailures,
   endSession,
@@ -49,6 +51,9 @@ api.post('/sync', requireSession, async (c) => {
   const since = typeof body.since === 'number' && Number.isFinite(body.since) ? body.since : 0
   return c.json(await sync(since, body.rows))
 })
+
+// Claude (Code, Cowork, chat) talks to Brian here; its own token, not the cookie.
+api.route('/mcp', mcpApp(pgRecords))
 
 api.onError((err, c) => {
   console.error(err)

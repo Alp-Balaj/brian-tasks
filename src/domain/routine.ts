@@ -1,8 +1,8 @@
 // Routine model. A Routine is never finished — only done-for-today (a Check-in) or not.
 // It never appears on the Board, List or Calendar. Types first, pure functions below.
 import { getDay, startOfDay, subDays } from 'date-fns'
-import type { ISODate, ISODateTime } from './task'
-import { toISODate } from '../lib/dates'
+import type { ISODate, ISODateTime } from './task.ts'
+import { toISODate } from '../lib/dates.ts'
 
 /** date-fns getDay(): 0 = Sunday … 6 = Saturday. */
 export type Weekday = 0 | 1 | 2 | 3 | 4 | 5 | 6

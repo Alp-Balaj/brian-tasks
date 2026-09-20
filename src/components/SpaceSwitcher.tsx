@@ -4,9 +4,10 @@ import { useSpaces } from '../store/spaces'
 import { useSpaceSelection } from '../store/ui'
 import { ManageSpaces } from './ManageSpaces'
 import { SpaceDot } from './TaskCard'
+import { ChevronDownIcon } from './icons'
 
 /** Hollow dot: the "All spaces" choice is not a Space, so it gets no colour. */
-const AllDot = () => <span className="inline-block h-2 w-2 shrink-0 rounded-full border-2 border-neutral-400" />
+const AllDot = () => <span className="inline-block h-2 w-2 shrink-0 rounded-full border-2 border-fg-faint" />
 
 /**
  * Sidebar / mobile-header dropdown: every Space with its colour dot, "All spaces",
@@ -51,17 +52,17 @@ export function SpaceSwitcher() {
         aria-expanded={open}
         aria-label="Space"
         onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center gap-2 rounded-md border border-neutral-300 bg-white px-2 py-1.5 text-sm hover:border-neutral-400"
+        className="flex min-h-10 w-full items-center gap-2 rounded-xl border border-line-strong bg-surface px-3 text-sm hover:bg-surface-2"
       >
         {current ? <SpaceDot colour={current.colour} /> : <AllDot />}
         <span className="min-w-0 flex-1 truncate text-left">{current?.name ?? 'All spaces'}</span>
-        <span className="text-xs text-neutral-400">▾</span>
+        <ChevronDownIcon size={16} className="text-fg-faint" />
       </button>
 
       {open && (
         <div
           role="listbox"
-          className="absolute right-0 z-30 mt-1 w-max min-w-full max-w-64 overflow-hidden rounded-md border border-neutral-200 bg-white py-1 shadow-lg"
+          className="absolute right-0 z-30 mt-1 w-max min-w-full max-w-64 overflow-hidden rounded-xl border border-line bg-surface py-1 shadow-xl shadow-black/10"
         >
           {spaces.map((s) => (
             <Option key={s.id} active={s.id === selected} onClick={() => choose(s.id)}>
@@ -73,14 +74,14 @@ export function SpaceSwitcher() {
             <AllDot />
             All spaces
           </Option>
-          <div className="my-1 border-t border-neutral-200" />
+          <div className="my-1 border-t border-line" />
           <button
             type="button"
             onClick={() => {
               setOpen(false)
               setManaging(true)
             }}
-            className="flex w-full items-center px-3 py-1.5 text-left text-sm text-neutral-500 hover:bg-neutral-100"
+            className="flex min-h-10 w-full items-center px-3 text-left text-sm text-fg-muted hover:bg-surface-2"
           >
             Manage spaces…
           </button>
@@ -99,7 +100,7 @@ function Option({ active, onClick, children }: { active: boolean; onClick: () =>
       role="option"
       aria-selected={active}
       onClick={onClick}
-      className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-neutral-100 ${
+      className={`flex min-h-10 w-full items-center gap-2 px-3 text-left text-sm hover:bg-surface-2 ${
         active ? 'font-medium' : ''
       }`}
     >

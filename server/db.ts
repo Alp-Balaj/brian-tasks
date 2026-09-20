@@ -37,33 +37,57 @@ export async function migrate(): Promise<void> {
  * each other's rows through interleaved sequence numbers.
  */
 export async function sync(since: number, incoming: Row[]): Promise<{ cursor: number; rows: Row[] }> {
-  const client = await pool.connect()
-  try {
-    await client.query('BEGIN')
-    await client.query('SELECT pg_advisory_xact_lock(1)')
-    for (const row of incoming) {
-      await client.query(
-        `INSERT INTO rows (kind, id, updated_at, deleted, data, seq)
-         VALUES ($1, $2, $3, $4, $5, nextval('sync_seq'))
-         ON CONFLICT (kind, id) DO UPDATE
-           SET updated_at = EXCLUDED.updated_at,
-               deleted    = EXCLUDED.deleted,
-               data       = EXCLUDED.data,
-               seq        = nextval('sync_seq')
-           WHERE rows.updated_at < EXCLUDED.updated_at`,
-        [row.kind, row.id, row.updatedAt, row.deleted, row.deleted ? null : JSON.stringify(row.data)],
-      )
-    }
+  return locked(async (client) => {
+    await applyRows(client, incoming)
     const changed = await client.query<{ kind: string; id: string; updated_at: string; deleted: boolean; data: unknown }>(
       'SELECT kind, id, updated_at, deleted, data FROM rows WHERE seq > $1 ORDER BY seq',
       [since],
     )
     const max = await client.query<{ cursor: string }>('SELECT COALESCE(MAX(seq), 0)::text AS cursor FROM rows')
-    await client.query('COMMIT')
     return {
       cursor: Number(max.rows[0].cursor),
       rows: changed.rows.map((r) => ({ kind: r.kind, id: r.id, updatedAt: r.updated_at, deleted: r.deleted, data: r.data })),
     }
+  })
+}
+
+/** Rows written on the server itself (the MCP tools) follow exactly the sync rule. */
+export const writeRows = (rows: Row[]): Promise<void> => locked((client) => applyRows(client, rows))
+
+/** Every live row of one kind. */
+export async function readRows(kind: string): Promise<Row[]> {
+  const res = await pool.query<{ id: string; updated_at: string; data: unknown }>(
+    'SELECT id, updated_at, data FROM rows WHERE kind = $1 AND NOT deleted',
+    [kind],
+  )
+  return res.rows.map((r) => ({ kind, id: r.id, updatedAt: r.updated_at, deleted: false, data: r.data }))
+}
+
+async function applyRows(client: pg.PoolClient, incoming: Row[]): Promise<void> {
+  for (const row of incoming) {
+    await client.query(
+      `INSERT INTO rows (kind, id, updated_at, deleted, data, seq)
+       VALUES ($1, $2, $3, $4, $5, nextval('sync_seq'))
+       ON CONFLICT (kind, id) DO UPDATE
+         SET updated_at = EXCLUDED.updated_at,
+             deleted    = EXCLUDED.deleted,
+             data       = EXCLUDED.data,
+             seq        = nextval('sync_seq')
+         WHERE rows.updated_at < EXCLUDED.updated_at`,
+      [row.kind, row.id, row.updatedAt, row.deleted, row.deleted ? null : JSON.stringify(row.data)],
+    )
+  }
+}
+
+/** One transaction under the advisory lock every writer takes. */
+async function locked<T>(fn: (client: pg.PoolClient) => Promise<T>): Promise<T> {
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    await client.query('SELECT pg_advisory_xact_lock(1)')
+    const result = await fn(client)
+    await client.query('COMMIT')
+    return result
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {})
     throw err

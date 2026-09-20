@@ -20,7 +20,7 @@ export default function App() {
   }, [])
 
   if (!hydrated) {
-    return <div className="grid h-full place-items-center text-sm text-neutral-500">Loading…</div>
+    return <div className="grid h-full place-items-center text-sm text-fg-muted">Loading…</div>
   }
   if (signedOut) return <LoginScreen />
 

@@ -15,8 +15,8 @@ export default defineConfig({
         name: 'Brian Tasks',
         short_name: 'Brian',
         description: 'Personal task manager',
-        theme_color: '#fafafa',
-        background_color: '#fafafa',
+        theme_color: '#f9f8f6',
+        background_color: '#f9f8f6',
         display: 'standalone',
         start_url: '/home',
         icons: [

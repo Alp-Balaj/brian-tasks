@@ -5,7 +5,9 @@ import { useSpaces } from '../store/spaces'
 import { useSpaceSelection } from '../store/ui'
 import { Sheet } from './Sheet'
 import { SpaceDot } from './TaskCard'
-import type { ISODate, TaskStatus } from '../domain/task'
+import { Button, ChipButton, field } from './ui'
+import { formatDay, shiftISODate, toISODate } from '../lib/dates'
+import type { ISODate, TaskPriority, TaskStatus } from '../domain/task'
 import { ALL_SPACES, DEFAULT_SPACE_ID } from '../domain/space'
 
 interface Props {
@@ -13,7 +15,10 @@ interface Props {
   defaults?: { status?: TaskStatus; due?: ISODate }
 }
 
-/** Minimal create dialog: title + Enter. Details are edited afterwards in TaskEditor. */
+/**
+ * Create dialog: title + Enter, with one-tap chips for the things you most often set
+ * at creation (Space, due Today/Tomorrow, priority). Everything else is edited afterwards.
+ */
 export function QuickAdd({ onClose, defaults }: Props) {
   const add = useTasks((s) => s.add)
   const spaces = useSpaces((s) => s.spaces)
@@ -31,58 +36,101 @@ export function QuickAdd({ onClose, defaults }: Props) {
     return exists(preferred) ? preferred : DEFAULT_SPACE_ID
   })
   const [title, setTitle] = useState('')
+  const [due, setDue] = useState<ISODate | undefined>(defaults?.due)
+  const [priority, setPriority] = useState<TaskPriority>('normal')
 
-  const space = spaces.find((s) => s.id === spaceId)
+  const today = toISODate(new Date())
+  const tomorrow = shiftISODate(today, 1)
 
   const submit = () => {
     if (!title.trim()) return
-    add({ title, ...defaults, spaceId })
+    add({ title, status: defaults?.status, due, priority, spaceId })
     setLastUsed(spaceId)
     onClose()
   }
 
   return (
-    <Sheet onClose={onClose}>
+    <Sheet
+      onClose={onClose}
+      size="sm"
+      title="New task"
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" form="quick-add" disabled={!title.trim()}>
+            Add
+          </Button>
+        </div>
+      }
+    >
       <form
+        id="quick-add"
         onSubmit={(e) => {
           e.preventDefault()
           submit()
         }}
-        className="flex flex-col gap-3"
+        className="flex flex-col gap-4"
       >
-        <label className="text-sm font-medium">New task</label>
         <input
           autoFocus
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           placeholder="What needs doing?"
-          className="rounded-md border border-neutral-300 px-3 py-2 text-base outline-none focus:border-neutral-900"
+          aria-label="Title"
+          enterKeyHint="done"
+          className={`${field} min-h-12 text-lg md:text-base`}
         />
+
         {showPicker && (
-          <label className="flex items-center gap-2 text-xs text-neutral-500">
-            {space && <SpaceDot colour={space.colour} />}
-            <span>Space</span>
-            <select
-              value={spaceId}
-              onChange={(e) => setSpaceId(e.target.value)}
-              className="min-w-0 flex-1 rounded-md border border-neutral-300 px-2 py-1.5 text-sm text-neutral-900"
-            >
-              {spaces.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div role="radiogroup" aria-label="Space" className="flex flex-wrap gap-1.5">
+            {spaces.map((s) => (
+              <ChipButton
+                key={s.id}
+                role="radio"
+                aria-checked={s.id === spaceId}
+                active={s.id === spaceId}
+                onClick={() => setSpaceId(s.id)}
+                className="inline-flex items-center gap-2"
+              >
+                <SpaceDot colour={s.colour} />
+                {s.name}
+              </ChipButton>
+            ))}
+          </div>
         )}
-        {defaults?.due && <div className="text-xs text-neutral-500">Due {defaults.due}</div>}
-        <div className="flex justify-end gap-2">
-          <button type="button" onClick={onClose} className="rounded-md px-3 py-2 text-sm hover:bg-neutral-100">
-            Cancel
-          </button>
-          <button type="submit" className="rounded-md bg-neutral-900 px-3 py-2 text-sm text-white">
-            Add
-          </button>
+
+        <div className="flex flex-wrap gap-1.5">
+          {defaults?.due ? (
+            <ChipButton active onClick={() => setDue((d) => (d ? undefined : defaults.due))}>
+              Due {formatDay(defaults.due, today)}
+            </ChipButton>
+          ) : (
+            <>
+              <ChipButton active={due === today} onClick={() => setDue((d) => (d === today ? undefined : today))}>
+                Today
+              </ChipButton>
+              <ChipButton active={due === tomorrow} onClick={() => setDue((d) => (d === tomorrow ? undefined : tomorrow))}>
+                Tomorrow
+              </ChipButton>
+            </>
+          )}
+          <span className="w-2" aria-hidden />
+          <ChipButton
+            active={priority === 'high'}
+            onClick={() => setPriority((p) => (p === 'high' ? 'normal' : 'high'))}
+            tone="warn"
+          >
+            ! High
+          </ChipButton>
+          <ChipButton
+            active={priority === 'urgent'}
+            onClick={() => setPriority((p) => (p === 'urgent' ? 'normal' : 'urgent'))}
+            tone="danger"
+          >
+            !! Urgent
+          </ChipButton>
         </div>
       </form>
     </Sheet>

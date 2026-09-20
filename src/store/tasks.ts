@@ -1,7 +1,6 @@
 import { create } from 'zustand'
 import { nanoid } from 'nanoid'
-import type { NewTask, Task, TaskPatch, TaskStatus } from '../domain/task'
-import { DEFAULT_SPACE_ID } from '../domain/space'
+import { applyPatch, buildTask, type NewTask, type Task, type TaskPatch, type TaskStatus } from '../domain/task'
 import { useTombstones } from './tombstones'
 
 interface TaskState {
@@ -31,39 +30,14 @@ export const useTasks = create<TaskState>((set, get) => {
     tasks: [],
 
     add: (input) => {
-      const ts = now()
-      const status = input.status ?? 'todo'
-      const siblings = get().tasks.filter((t) => t.status === status)
-      const task: Task = {
-        id: nanoid(10),
-        title: input.title.trim(),
-        description: input.description ?? '',
-        status,
-        priority: input.priority ?? 'normal',
-        tags: input.tags ?? [],
-        due: input.due,
-        scheduled: input.scheduled,
-        order: input.order ?? Math.min(0, ...siblings.map((t) => t.order)) - 1,
-        spaceId: input.spaceId ?? DEFAULT_SPACE_ID,
-        archived: input.archived ?? false,
-        pinned: status === 'done' ? false : (input.pinned ?? false),
-        createdAt: ts,
-        updatedAt: ts,
-        completedAt: status === 'done' ? ts : undefined,
-      }
+      const task = buildTask(input, nanoid(10), get().tasks, now())
       set({ tasks: [task, ...get().tasks] })
       return task
     },
 
     update: (id, patch) => {
-      patchOne(id, (t) => {
-        const next: Task = { ...t, ...patch, updatedAt: now() }
-        if (patch.status && patch.status !== t.status) {
-          next.completedAt = patch.status === 'done' ? now() : undefined
-        }
-        if (next.status === 'done') next.pinned = false
-        return next
-      })
+      const ts = now()
+      patchOne(id, (t) => applyPatch(t, patch, ts))
     },
 
     remove: (id) => {

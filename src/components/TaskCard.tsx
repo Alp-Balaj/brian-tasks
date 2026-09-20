@@ -1,14 +1,10 @@
-import type { Task } from '../domain/task'
+import { STATUS_LABEL, type Task } from '../domain/task'
 import { ALL_SPACES } from '../domain/space'
 import { useSpaces } from '../store/spaces'
 import { useSpaceSelection } from '../store/ui'
-
-const PRIORITY_DOT: Record<Task['priority'], string> = {
-  urgent: 'bg-red-500',
-  high: 'bg-orange-400',
-  normal: 'bg-neutral-300',
-  low: 'bg-neutral-200',
-}
+import { formatDay, toISODate } from '../lib/dates'
+import { ChevronDownIcon } from './icons'
+import { Chip } from './ui'
 
 /** The one visual for a Space: a small dot in its colour. Shared by cards, rows and the switcher. */
 export function SpaceDot({ colour, title, className = '' }: { colour: string; title?: string; className?: string }) {
@@ -28,42 +24,93 @@ function useTaskSpace(task: Task) {
   return useSpaces((s) => (all ? s.spaces.find((x) => x.id === task.spaceId) : undefined))
 }
 
-/** Compact task representation shared by board and calendar. Presentation only. */
-export function TaskCard({ task, onClick, compact }: { task: Task; onClick?: () => void; compact?: boolean }) {
+/** Due date as a chip whose tone says how urgent it is (red = overdue, amber = today). Shared by cards and rows. */
+export function DueChip({ due, done, today = toISODate(new Date()) }: { due: string; done?: boolean; today?: string }) {
+  const tone = done ? 'neutral' : due < today ? 'danger' : due === today ? 'warn' : 'neutral'
+  return <Chip tone={tone}>{formatDay(due, today)}</Chip>
+}
+
+/** Small "!" / "!!" mark for the two priorities that should stand out. */
+export function PriorityMark({ priority }: { priority: Task['priority'] }) {
+  if (priority === 'urgent') return <span className="text-xs font-bold text-danger">!!</span>
+  if (priority === 'high') return <span className="text-xs font-bold text-warn">!</span>
+  return null
+}
+
+/**
+ * Compact task representation shared by board and calendar. Presentation only.
+ * `onStatus` adds a status button (the tap alternative to dragging between columns).
+ */
+export function TaskCard({
+  task,
+  onClick,
+  compact,
+  onStatus,
+}: {
+  task: Task
+  onClick?: () => void
+  compact?: boolean
+  onStatus?: () => void
+}) {
   const space = useTaskSpace(task)
+  const done = task.status === 'done'
+
+  if (compact) {
+    return (
+      <div
+        onClick={onClick}
+        className="flex cursor-pointer items-center gap-1 truncate rounded-md bg-surface-2 px-1.5 py-0.5 text-xs hover:bg-surface-3"
+      >
+        <PriorityMark priority={task.priority} />
+        <span className={`min-w-0 flex-1 truncate ${done ? 'text-fg-faint line-through' : ''}`}>{task.title}</span>
+        {/* Compact cards have no room for the name; the dot alone still fits. */}
+        {space && <SpaceDot colour={space.colour} title={space.name} />}
+      </div>
+    )
+  }
+
+  const hasMeta = task.due || task.tags.length > 0 || space
   return (
     <div
       onClick={onClick}
-      className={`cursor-pointer rounded-md border border-neutral-200 bg-white shadow-sm hover:border-neutral-400 ${
-        compact ? 'px-1.5 py-0.5 text-xs' : 'px-3 py-2 text-sm'
-      }`}
+      className="cursor-pointer rounded-xl bg-surface px-3 py-2.5 shadow-sm shadow-black/5 ring-1 ring-line/60 transition-colors hover:ring-line-strong"
     >
       <div className="flex items-start gap-2">
-        <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${PRIORITY_DOT[task.priority]}`} />
-        <span
-          className={`min-w-0 flex-1 ${compact ? 'truncate' : ''} ${task.status === 'done' ? 'text-neutral-400 line-through' : ''}`}
-        >
-          {task.title}
-        </span>
-        {/* Compact cards have no room for the name; the dot alone still fits. */}
-        {compact && space && <SpaceDot colour={space.colour} title={space.name} className="mt-1" />}
-      </div>
-      {!compact && (task.due || task.tags.length > 0 || space) && (
-        <div className="mt-1 flex flex-wrap items-center gap-1 pl-4 text-xs text-neutral-500">
-          {space && (
-            <span className="inline-flex items-center gap-1">
-              <SpaceDot colour={space.colour} />
-              {space.name}
-            </span>
+        <div className="min-w-0 flex-1">
+          <div className={`flex items-baseline gap-1.5 text-[15px] leading-snug ${done ? 'text-fg-faint line-through' : ''}`}>
+            <PriorityMark priority={task.priority} />
+            <span className="min-w-0 line-clamp-3">{task.title}</span>
+          </div>
+          {hasMeta && (
+            <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs text-fg-muted">
+              {space && (
+                <span className="inline-flex items-center gap-1">
+                  <SpaceDot colour={space.colour} />
+                  {space.name}
+                </span>
+              )}
+              {task.due && <DueChip due={task.due} done={done} />}
+              {task.tags.map((t) => (
+                <Chip key={t}>{t}</Chip>
+              ))}
+            </div>
           )}
-          {task.due && <span>due {task.due}</span>}
-          {task.tags.map((t) => (
-            <span key={t} className="rounded bg-neutral-100 px-1">
-              {t}
-            </span>
-          ))}
         </div>
-      )}
+        {onStatus && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              onStatus()
+            }}
+            onPointerDown={(e) => e.stopPropagation()}
+            aria-label={`Status: ${STATUS_LABEL[task.status]}. Change`}
+            className="-mt-1 -mr-2 grid h-10 w-10 shrink-0 place-items-center rounded-full text-fg-faint hover:bg-surface-2 hover:text-fg"
+          >
+            <ChevronDownIcon size={18} />
+          </button>
+        )}
+      </div>
     </div>
   )
 }

@@ -1,23 +1,27 @@
-import { useState } from 'react'
+import { useState, type ComponentType } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 import { TaskEditor } from './TaskEditor'
 import { QuickAdd } from './QuickAdd'
 import { SpaceSwitcher } from './SpaceSwitcher'
 import { SyncBadge } from './SyncBadge'
+import { ArchiveIcon, BoardIcon, CalendarIcon, HomeIcon, ListIcon, PlusIcon } from './icons'
 
 /** The four mobile tabs. Archive is desktop-sidebar only, plus a footer link on List (Q29). */
-const NAV = [
-  { to: '/home', label: 'Home', icon: '⌂' },
-  { to: '/board', label: 'Board', icon: '▦' },
-  { to: '/list', label: 'List', icon: '☰' },
-  { to: '/calendar', label: 'Calendar', icon: '▤' },
+const NAV: { to: string; label: string; Icon: ComponentType<{ size?: number }> }[] = [
+  { to: '/home', label: 'Home', Icon: HomeIcon },
+  { to: '/board', label: 'Board', Icon: BoardIcon },
+  { to: '/list', label: 'List', Icon: ListIcon },
+  { to: '/calendar', label: 'Calendar', Icon: CalendarIcon },
 ]
 
-const navLink = ({ isActive }: { isActive: boolean }) =>
-  `rounded-md px-3 py-2 text-sm ${isActive ? 'bg-neutral-900 text-white' : 'hover:bg-neutral-100'}`
+const sidebarLink = ({ isActive }: { isActive: boolean }) =>
+  `flex min-h-10 items-center gap-2.5 rounded-lg px-3 text-sm ${
+    isActive ? 'bg-surface-2 font-medium text-fg' : 'text-fg-muted hover:bg-surface-2 hover:text-fg'
+  }`
 
 /**
- * App frame. Desktop: left sidebar + content. Mobile: content + bottom tab bar.
+ * App frame. Desktop: left sidebar + content. Mobile: header + content + bottom tab bar,
+ * with the add button floating above the tabs (thumb-reachable, HIG/M3 placement).
  * The selected task (for editing) is app-level state so every view can open it.
  */
 export function Shell() {
@@ -27,28 +31,29 @@ export function Shell() {
   return (
     <div className="flex h-full flex-col md:flex-row">
       {/* Desktop sidebar */}
-      <aside className="hidden w-52 shrink-0 flex-col border-r border-neutral-200 bg-white p-3 md:flex">
-        <div className="mb-3 px-2 text-lg font-semibold">Brian Tasks</div>
+      <aside className="hidden w-56 shrink-0 flex-col border-r border-line bg-surface p-3 md:flex">
+        <div className="mb-3 px-3 text-lg font-semibold">Brian Tasks</div>
         <div className="mb-4 px-1">
           <SpaceSwitcher />
         </div>
-        <nav className="flex flex-col gap-1">
-          {NAV.map((n) => (
-            <NavLink key={n.to} to={n.to} className={navLink}>
-              <span className="mr-2">{n.icon}</span>
-              {n.label}
+        <nav className="flex flex-col gap-0.5">
+          {NAV.map(({ to, label, Icon }) => (
+            <NavLink key={to} to={to} className={sidebarLink}>
+              <Icon size={18} />
+              {label}
             </NavLink>
           ))}
-          <NavLink to="/archive" className={(a) => `${navLink(a)} mt-3 text-neutral-500`}>
-            <span className="mr-2">▣</span>
+          <NavLink to="/archive" className={(a) => `${sidebarLink(a)} mt-3`}>
+            <ArchiveIcon size={18} />
             Archive
           </NavLink>
         </nav>
         <button
           onClick={() => setQuickAddOpen(true)}
-          className="mt-auto rounded-md bg-neutral-900 px-3 py-2 text-sm text-white hover:bg-neutral-700"
+          className="mt-auto inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-accent px-3 text-sm font-medium text-accent-fg hover:opacity-90"
         >
-          + New task
+          <PlusIcon size={18} />
+          New task
         </button>
         <div className="mt-3">
           <SyncBadge />
@@ -56,40 +61,43 @@ export function Shell() {
       </aside>
 
       {/* Mobile header */}
-      <header className="flex items-center justify-between border-b border-neutral-200 bg-white px-4 py-3 md:hidden">
-        <div className="-mx-2">
-          <div className="px-2 font-semibold">Brian Tasks</div>
+      <header className="flex items-center justify-between gap-3 border-b border-line bg-surface px-4 pt-[env(safe-area-inset-top)] md:hidden">
+        <div className="min-w-0 py-2">
+          <div className="font-semibold">Brian Tasks</div>
           <SyncBadge />
         </div>
-        <div className="flex items-center gap-2">
-          <div className="w-36">
-            <SpaceSwitcher />
-          </div>
-          <button
-            onClick={() => setQuickAddOpen(true)}
-            className="rounded-md bg-neutral-900 px-3 py-1.5 text-sm text-white"
-          >
-            + New
-          </button>
+        <div className="w-44 shrink-0">
+          <SpaceSwitcher />
         </div>
       </header>
 
-      <main className="min-h-0 flex-1 overflow-auto pb-16 md:pb-0">
+      <main className="min-h-0 flex-1 overflow-auto pb-[calc(var(--spacing-tabbar)+env(safe-area-inset-bottom))] md:pb-0">
         <Outlet context={{ openTask: setEditingId } satisfies ShellContext} />
       </main>
 
+      {/* Mobile FAB */}
+      <button
+        onClick={() => setQuickAddOpen(true)}
+        aria-label="New task"
+        className="fixed right-4 bottom-[calc(var(--spacing-tabbar)+env(safe-area-inset-bottom)+1rem)] z-10 grid h-14 w-14 place-items-center rounded-2xl bg-accent text-accent-fg shadow-lg shadow-black/20 active:scale-95 md:hidden"
+      >
+        <PlusIcon size={26} />
+      </button>
+
       {/* Mobile bottom tabs */}
-      <nav className="fixed inset-x-0 bottom-0 z-10 flex border-t border-neutral-200 bg-white pb-[env(safe-area-inset-bottom)] md:hidden">
-        {NAV.map((n) => (
+      <nav className="fixed inset-x-0 bottom-0 z-10 flex border-t border-line bg-surface pb-[env(safe-area-inset-bottom)] md:hidden">
+        {NAV.map(({ to, label, Icon }) => (
           <NavLink
-            key={n.to}
-            to={n.to}
+            key={to}
+            to={to}
             className={({ isActive }) =>
-              `flex flex-1 flex-col items-center py-2 text-xs ${isActive ? 'text-neutral-900' : 'text-neutral-400'}`
+              `flex h-tabbar flex-1 flex-col items-center justify-center gap-0.5 text-[11px] font-medium ${
+                isActive ? 'text-accent' : 'text-fg-faint'
+              }`
             }
           >
-            <span className="text-lg leading-none">{n.icon}</span>
-            {n.label}
+            <Icon size={22} />
+            {label}
           </NavLink>
         ))}
       </nav>

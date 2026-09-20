@@ -1,6 +1,6 @@
 // Space model. A Space is the one container a Task lives in; Spaces partition Tasks.
 // Same rule as task.ts: no UI / storage concerns here.
-import type { ISODateTime } from './task'
+import type { ISODateTime } from './task.ts'
 
 export interface Space {
   id: string
