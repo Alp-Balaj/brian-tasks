@@ -3,6 +3,7 @@ import { nanoid } from 'nanoid'
 import { DEFAULT_SPACE_ID, type Space, type SpacePatch } from '../domain/space'
 import { useTasks } from './tasks'
 import { useSpaceSelection } from './ui'
+import { useTombstones } from './tombstones'
 
 interface SpaceState {
   /** Always sorted by `order`. */
@@ -18,6 +19,8 @@ interface SpaceState {
 
 export const sortSpaces = (spaces: Space[]) => [...spaces].sort((a, b) => a.order - b.order)
 
+const now = () => new Date().toISOString()
+
 export const useSpaces = create<SpaceState>((set, get) => ({
   spaces: [],
 
@@ -28,13 +31,14 @@ export const useSpaces = create<SpaceState>((set, get) => ({
       name: name.trim(),
       colour,
       order: spaces.length === 0 ? 0 : Math.max(...spaces.map((s) => s.order)) + 1,
+      updatedAt: now(),
     }
     set({ spaces: sortSpaces([...spaces, space]) })
     return space
   },
 
   update: (id, patch) => {
-    set({ spaces: sortSpaces(get().spaces.map((s) => (s.id === id ? { ...s, ...patch } : s))) })
+    set({ spaces: sortSpaces(get().spaces.map((s) => (s.id === id ? { ...s, ...patch, updatedAt: now() } : s))) })
   },
 
   reorder: (ids) => {
@@ -42,19 +46,21 @@ export const useSpaces = create<SpaceState>((set, get) => ({
     const spaces = get().spaces
     const listed = spaces.filter((s) => rank.has(s.id)).sort((a, b) => rank.get(a.id)! - rank.get(b.id)!)
     const rest = spaces.filter((s) => !rank.has(s.id))
-    set({ spaces: [...listed, ...rest].map((s, order) => (s.order === order ? s : { ...s, order })) })
+    const ts = now()
+    set({ spaces: [...listed, ...rest].map((s, order) => (s.order === order ? s : { ...s, order, updatedAt: ts })) })
   },
 
   remove: (id) => {
     if (id === DEFAULT_SPACE_ID) return
     if (!get().spaces.some((s) => s.id === id)) return
-    const ts = new Date().toISOString()
+    const ts = now()
     useTasks.setState((s) => ({
       tasks: s.tasks.map((t) => (t.spaceId === id ? { ...t, spaceId: DEFAULT_SPACE_ID, updatedAt: ts } : t)),
     }))
     const ui = useSpaceSelection.getState()
     if (ui.selected === id) ui.select(DEFAULT_SPACE_ID)
     if (ui.lastUsedSpaceId === id) ui.setLastUsed(DEFAULT_SPACE_ID)
+    useTombstones.getState().bury('space', id)
     set({ spaces: get().spaces.filter((s) => s.id !== id) })
   },
 

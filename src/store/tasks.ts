@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { nanoid } from 'nanoid'
 import type { NewTask, Task, TaskPatch, TaskStatus } from '../domain/task'
 import { DEFAULT_SPACE_ID } from '../domain/space'
+import { useTombstones } from './tombstones'
 
 interface TaskState {
   tasks: Task[]
@@ -66,6 +67,8 @@ export const useTasks = create<TaskState>((set, get) => {
     },
 
     remove: (id) => {
+      if (!get().tasks.some((t) => t.id === id)) return
+      useTombstones.getState().bury('task', id)
       set({ tasks: get().tasks.filter((t) => t.id !== id) })
     },
 
@@ -94,7 +97,8 @@ export const useTasks = create<TaskState>((set, get) => {
               pinned: done ? false : t.pinned,
             }
           }
-          return t.order === order ? t : { ...t, order }
+          // Siblings that shift need a fresh `updatedAt` too, or other Devices never learn the new order.
+          return t.order === order ? t : { ...t, order, updatedAt: ts }
         }),
       })
     },

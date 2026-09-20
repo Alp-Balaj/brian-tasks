@@ -1,6 +1,9 @@
 import { useEffect } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { hydrate, useHydration } from './store/persist'
+import { startSync } from './sync/engine'
+import { useSync } from './sync/status'
+import { LoginScreen } from './components/LoginScreen'
 import { Shell } from './components/Shell'
 import { HomeView } from './views/home/HomeView'
 import { BoardView } from './views/board/BoardView'
@@ -10,14 +13,16 @@ import { ArchiveView } from './views/archive/ArchiveView'
 
 export default function App() {
   const hydrated = useHydration((s) => s.hydrated)
+  const signedOut = useSync((s) => s.status === 'signed-out')
 
   useEffect(() => {
-    void hydrate()
+    void hydrate().then(startSync)
   }, [])
 
   if (!hydrated) {
     return <div className="grid h-full place-items-center text-sm text-neutral-500">Loading…</div>
   }
+  if (signedOut) return <LoginScreen />
 
   return (
     <Routes>

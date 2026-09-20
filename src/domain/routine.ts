@@ -17,14 +17,33 @@ export interface Routine {
   /** Free text, e.g. "currently: Peak". */
   note: string
   archived: boolean
-  /** Days with a Check-in. Sorted ascending, unique. */
+  /**
+   * Days with a Check-in. Sorted ascending, unique. Derived by the store from
+   * the CheckIn records — change it through `checkIn` / `uncheck`, never here.
+   */
   checkIns: ISODate[]
   createdAt: ISODateTime
   updatedAt: ISODateTime
 }
 
-export type NewRoutine = Partial<Omit<Routine, 'id' | 'createdAt' | 'updatedAt'>> & { title: string }
-export type RoutinePatch = Partial<Omit<Routine, 'id' | 'createdAt'>>
+/** A Routine as stored and synced: the Check-ins live in their own records. */
+export type RoutineRecord = Omit<Routine, 'checkIns'>
+
+/**
+ * The record that a Routine was done on one day. A fact about that day, not an
+ * edit to the Routine, so Devices merge Check-ins as a union: one made anywhere
+ * stays made everywhere until explicitly unchecked.
+ */
+export interface CheckIn {
+  routineId: string
+  date: ISODate
+  updatedAt: ISODateTime
+}
+
+export const checkInId = (routineId: string, date: ISODate) => `${routineId}:${date}`
+
+export type NewRoutine = Partial<Omit<Routine, 'id' | 'createdAt' | 'updatedAt' | 'checkIns'>> & { title: string }
+export type RoutinePatch = Partial<Omit<Routine, 'id' | 'createdAt' | 'checkIns'>>
 
 // ---- Pure functions (S2) -------------------------------------------------------
 // All date arithmetic below runs on local calendar days. `Date` values are only used

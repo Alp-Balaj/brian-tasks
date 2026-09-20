@@ -1,5 +1,6 @@
 // Space model. A Space is the one container a Task lives in; Spaces partition Tasks.
 // Same rule as task.ts: no UI / storage concerns here.
+import type { ISODateTime } from './task'
 
 export interface Space {
   id: string
@@ -8,6 +9,8 @@ export interface Space {
   colour: string
   /** Manual ordering in the switcher (lower = higher up). */
   order: number
+  /** Last change on any Device; decides which copy wins when Devices catch up. */
+  updatedAt: ISODateTime
 }
 
 /** The built-in Space. Cannot be deleted; tasks of a deleted Space move here. */
@@ -32,11 +35,12 @@ export const SPACE_COLOURS: readonly string[] = [
 ]
 
 export type NewSpace = Pick<Space, 'name' | 'colour'>
-export type SpacePatch = Partial<Omit<Space, 'id'>>
+export type SpacePatch = Partial<Omit<Space, 'id' | 'updatedAt'>>
 
 export const defaultSpace = (): Space => ({
   id: DEFAULT_SPACE_ID,
   name: 'Personal',
   colour: SPACE_COLOURS[0],
   order: 0,
+  updatedAt: new Date(0).toISOString(),
 })

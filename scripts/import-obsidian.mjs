@@ -1,6 +1,6 @@
-// One-off importer: Obsidian TaskNotes (markdown + YAML frontmatter) -> public/seed.json
+// One-off importer: Obsidian TaskNotes (markdown + YAML frontmatter) -> dev/seed.json
 // Usage: node scripts/import-obsidian.mjs "/path/to/vault/1 - Managing Brian/Tasks"
-// The app loads seed.json only when local storage is empty (first run).
+// The dev build loads it only when local storage is empty (first run); production never does.
 // This is a data import, not a model: the app's own task model lives in src/domain/task.ts.
 
 import { readdirSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
@@ -71,5 +71,5 @@ for (const file of readdirSync(dir).filter((f) => f.endsWith('.md'))) {
 }
 
 mkdirSync('public', { recursive: true })
-writeFileSync('public/seed.json', JSON.stringify(tasks, null, 2))
-console.log(`wrote ${tasks.length} tasks to public/seed.json`)
+writeFileSync('dev/seed.json', JSON.stringify(tasks, null, 2))
+console.log(`wrote ${tasks.length} tasks to dev/seed.json`)
