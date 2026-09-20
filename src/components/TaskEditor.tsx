@@ -1,19 +1,23 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type TextareaHTMLAttributes } from 'react'
 import { useTasks } from '../store/tasks'
 import { useSpaces } from '../store/spaces'
+import { useBlocks } from '../store/blocks'
 import { Sheet } from './Sheet'
 import { SpaceDot } from './TaskCard'
 import { Button, ChipButton, Segmented, SectionLabel, field, type Tone } from './ui'
 import { CloseIcon } from './icons'
 import { formatDay, shiftISODate, toISODate } from '../lib/dates'
+import { useToday } from '../lib/useToday'
 import {
   PRIORITY_LABEL,
   STATUS_LABEL,
   TASK_PRIORITIES,
   TASK_STATUSES,
   type ISODate,
+  type Task,
   type TaskPriority,
 } from '../domain/task'
+import { describeSpan, isTimed, unplacedOn } from '../domain/block'
 
 interface Props {
   taskId: string
@@ -87,6 +91,8 @@ export function TaskEditor({ taskId, onClose }: Props) {
           <DateField label="Scheduled" value={task.scheduled} onChange={(scheduled) => set({ scheduled })} />
         </div>
 
+        <PlacedLine task={task} />
+
         <Field label="Space">
           <div role="radiogroup" aria-label="Space" className="flex flex-wrap gap-1.5">
             {spaces.map((s) => (
@@ -137,6 +143,46 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   )
 }
 
+/**
+ * Where the task is placed on the Week page, read-only (§5.7): one line per placement
+ * with its hour and block. Placing is done from the Week page and the block sheet;
+ * Scheduling here creates nothing on the grid (TB-15), and re-Scheduling never removes
+ * a placement — the task is then "Scheduled Mon, not placed" (TB-17), said here.
+ */
+function PlacedLine({ task }: { task: Task }) {
+  const placements = useBlocks((s) => s.placements)
+  const blocks = useBlocks((s) => s.blocks)
+  const today = useToday()
+
+  const mine = placements
+    .filter((p) => p.taskId === task.id)
+    .sort((a, b) => a.date.localeCompare(b.date) || (a.start ?? Infinity) - (b.start ?? Infinity))
+  const unplaced = task.scheduled !== undefined && unplacedOn([task], placements, task.scheduled).length > 0
+  if (mine.length === 0 && !unplaced) return null
+
+  return (
+    <Field label="Placed">
+      {mine.length > 0 && (
+        <ul className="flex flex-col gap-1 text-sm">
+          {mine.map((p) => {
+            const block = p.blockId ? blocks.find((b) => b.id === p.blockId) : undefined
+            return (
+              <li key={p.id} className={`tabular-nums ${p.date < today ? 'text-fg-muted' : ''}`}>
+                {formatDay(p.date, today)}
+                {isTimed(p) && ` ${describeSpan(p.start, p.end)}`}
+                {block && <span className="text-fg-muted"> · in {block.name}</span>}
+              </li>
+            )
+          })}
+        </ul>
+      )}
+      {unplaced && task.scheduled && (
+        <span className="text-sm text-warn">Scheduled {formatDay(task.scheduled, today)}, not placed</span>
+      )}
+    </Field>
+  )
+}
+
 /** Native date input plus Today / Tomorrow / Clear shortcuts, so the common cases are one tap. */
 function DateField({ label, value, onChange }: { label: string; value?: ISODate; onChange: (v?: ISODate) => void }) {
   const today = toISODate(new Date())
@@ -161,7 +207,8 @@ function DateField({ label, value, onChange }: { label: string; value?: ISODate;
   )
 }
 
-function Switch({
+/** On/off toggle with a 28px track inside a 44px row. Shared with BlockSheet ("Carry to next week"). */
+export function Switch({
   checked,
   disabled,
   onChange,

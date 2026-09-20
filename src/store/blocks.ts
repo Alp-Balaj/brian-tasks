@@ -31,15 +31,18 @@ interface BlockState {
    * the version already starts in `week` (or later) it is patched in place. Otherwise
    * it is split at `week` (D8): the past version keeps the id, the patch lands on the
    * future one, and placements with `date >= week` are re-pointed to it. Moving the
-   * block to another weekday moves its placements with it.
+   * block to another weekday moves its placements with it. Returns the id of the
+   * version the change landed on (fresh after a split), so an open sheet can follow
+   * it; undefined when nothing applied.
    */
-  updateBlockFrom: (id: string, week: WeekKey, patch: BlockPatch) => void
+  updateBlockFrom: (id: string, week: WeekKey, patch: BlockPatch) => string | undefined
   /**
    * Carry to next week (TB-4). Off: `until = nextWeek(week)`, so `week` is the last
    * week, and placements in the block from then on are unlinked. On: `until` is
-   * cleared. Splits at `week` like `updateBlockFrom` when the version started earlier.
+   * cleared. Splits at `week` like `updateBlockFrom` when the version started earlier,
+   * and returns the id of the version it landed on the same way.
    */
-  setCarry: (id: string, week: WeekKey, carry: boolean) => void
+  setCarry: (id: string, week: WeekKey, carry: boolean) => string | undefined
   /**
    * "Remove from this week on" (§2): the version stops at `week` and its placements
    * from `week` on are removed. A version that starts in `week` or later is deleted
@@ -169,7 +172,7 @@ export const useBlocks = create<BlockState>((set, get) => {
 
     updateBlockFrom: (id, week, patch) => {
       const version = versionFrom(id, week)
-      if (!version) return
+      if (!version) return undefined
       const name = patch.name === undefined ? version.name : patch.name.trim()
       patchBlock(version.id, (b) => ({ ...b, ...patch, name, updatedAt: now() }))
       if (patch.weekday !== undefined && patch.weekday !== version.weekday) {
@@ -186,15 +189,17 @@ export const useBlocks = create<BlockState>((set, get) => {
           touched,
         )
       }
+      return version.id
     },
 
     setCarry: (id, week, carry) => {
       const version = versionFrom(id, week)
-      if (!version) return
+      if (!version) return undefined
       const until = carry ? undefined : nextWeek(week)
-      if (version.until === until) return
+      if (version.until === until) return version.id
       patchBlock(version.id, ({ until: _was, ...rest }) => ({ ...rest, ...(until === undefined ? {} : { until }), updatedAt: now() }))
       if (until !== undefined) unlink(version.id, until)
+      return version.id
     },
 
     endBlock: (id, week) => {
