@@ -61,6 +61,9 @@ api.onError((err, c) => {
 })
 app.route('/api', api)
 app.all('/api/*', (c) => c.text('Not found', 404))
+// MCP clients probe these for OAuth before connecting. A 404 says "no OAuth here,
+// use the token"; the index.html fallback below would answer with HTML instead.
+app.all('/.well-known/*', (c) => c.text('Not found', 404))
 
 // The app itself. Hashed assets are immutable; everything else must revalidate so
 // a new deploy (and its service worker) is picked up on the next open.
