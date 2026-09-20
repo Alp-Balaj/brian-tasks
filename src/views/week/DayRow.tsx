@@ -98,9 +98,10 @@ export function DayRow({ date, today, showLabel = true, showTray = true, badgeOn
       )}
 
       <div className={`relative ${showLabel ? '' : 'col-span-full'}`}>
+        {/* `isolate`: the bars' z-order (hatch, placements, now-line) stays inside the ruler, under sheets and the tab bar. */}
         <div
           {...drag.rulerProps}
-          className={`relative h-10 overflow-hidden rounded-md bg-surface ring-1 ring-line md:h-11 ${drag.enabled ? 'cursor-crosshair select-none' : ''}`}
+          className={`relative isolate h-10 overflow-hidden rounded-md bg-surface ring-1 ring-line md:h-11 ${drag.enabled ? 'cursor-crosshair select-none' : ''}`}
           style={{ backgroundImage: HOUR_TICKS }}
         >
           {[6, 12, 18].map((h) => (
@@ -165,7 +166,7 @@ export function DayRow({ date, today, showLabel = true, showTray = true, badgeOn
             data-drag-choice
             role="dialog"
             aria-label={`${describeSpan(choice.start, choice.end)} on ${format(noon, 'EEEE d MMMM')}`}
-            className="absolute top-full z-50 mt-1 flex w-max -translate-x-1/2 flex-col rounded-xl bg-surface p-1 shadow-lg ring-1 ring-line"
+            className="absolute top-full z-10 mt-1 flex w-max -translate-x-1/2 flex-col rounded-xl bg-surface p-1 shadow-lg ring-1 ring-line"
             style={{ left: choice.x }}
           >
             <span className="px-2.5 pt-1 pb-0.5 text-[11px] tabular-nums text-fg-faint">{describeSpan(choice.start, choice.end)}</span>
