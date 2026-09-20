@@ -61,7 +61,7 @@ The days on which a Routine is expected: every day, or a chosen set of weekdays.
 _Avoid_: Frequency, recurrence, RRULE
 
 **Check-in**:
-The record that a Routine was done on a specific day.
+The record that a Routine was done on a specific day. A Check-in is a fact about that day, not an edit to the Routine: once made anywhere it stays made everywhere until you explicitly uncheck it.
 _Avoid_: Completion, tick, done (reserved for Task Status)
 
 **Missed**:
@@ -85,3 +85,13 @@ _Avoid_: Dashboard, overview, today view
 **Archive**:
 The one place where Archived Tasks and Archived Routines can be seen, restored, or permanently deleted.
 _Avoid_: Trash, bin, history
+
+### Devices
+
+**Device**:
+One browser or installed app you use Brian from (the laptop, the phone). Your data is the same on every Device. A Device may be offline; it keeps working and catches up when it is back.
+_Avoid_: Client, session, install
+
+**Catching up**:
+What a Device does when it reconnects: it learns what changed elsewhere and tells the others what changed here. If the very same Task, Space or Routine was changed on two Devices while apart, the later change wins and the earlier one is gone. Check-ins are never lost this way.
+_Avoid_: Sync (fine in code, not in the UI), merge, conflict

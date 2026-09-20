@@ -3,6 +3,7 @@ import { NavLink, Outlet } from 'react-router-dom'
 import { TaskEditor } from './TaskEditor'
 import { QuickAdd } from './QuickAdd'
 import { SpaceSwitcher } from './SpaceSwitcher'
+import { SyncBadge } from './SyncBadge'
 
 /** The four mobile tabs. Archive is desktop-sidebar only, plus a footer link on List (Q29). */
 const NAV = [
@@ -49,11 +50,17 @@ export function Shell() {
         >
           + New task
         </button>
+        <div className="mt-3">
+          <SyncBadge />
+        </div>
       </aside>
 
       {/* Mobile header */}
       <header className="flex items-center justify-between border-b border-neutral-200 bg-white px-4 py-3 md:hidden">
-        <div className="font-semibold">Brian Tasks</div>
+        <div className="-mx-2">
+          <div className="px-2 font-semibold">Brian Tasks</div>
+          <SyncBadge />
+        </div>
         <div className="flex items-center gap-2">
           <div className="w-36">
             <SpaceSwitcher />

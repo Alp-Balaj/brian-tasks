@@ -1,19 +1,24 @@
 import type { Task } from '../domain/task'
 import type { Space } from '../domain/space'
-import type { Routine } from '../domain/routine'
-import { migrateV1 } from './migrate'
+import type { CheckIn, RoutineRecord } from '../domain/routine'
+import type { Tombstone } from './tombstones'
+import { migrateV1, migrateV2, type SnapshotV2 } from './migrate'
 
-/** Everything the app persists, saved and loaded as one unit. */
+/** Everything the app persists on this Device, saved and loaded as one unit. */
 export interface Snapshot {
   tasks: Task[]
   spaces: Space[]
-  routines: Routine[]
+  routines: RoutineRecord[]
+  checkIns: CheckIn[]
+  /** Deletions the server has not been told about yet. */
+  tombstones: Tombstone[]
 }
 
 /**
- * Persistence boundary. The app only ever talks to this interface, so swapping
- * localStorage for a real backend (REST, Supabase, SQLite via Tauri, ...) is a
- * matter of writing another adapter — no view code changes.
+ * On-device persistence boundary. The stores only ever talk to this interface;
+ * the server is reached separately by `sync/engine.ts`, which reads and writes
+ * the same stores. Swapping localStorage for IndexedDB is a matter of writing
+ * another adapter — no view code changes.
  */
 export interface Repository {
   /** `null` means nothing stored yet (first run) — the caller decides how to seed. */
@@ -21,25 +26,20 @@ export interface Repository {
   save(snapshot: Snapshot): Promise<void>
 }
 
+const V3_KEY = 'brian-tasks:v3'
 const V2_KEY = 'brian-tasks:v2'
 const V1_KEY = 'brian-tasks:v1'
 
 export const localStorageRepository: Repository = {
   async load() {
     try {
-      const v2 = localStorage.getItem(V2_KEY)
-      if (v2) {
-        const parsed: unknown = JSON.parse(v2)
-        return isSnapshot(parsed) ? parsed : null
-      }
-      // One-time upgrade. v1 is left in place so an older build still works.
-      const v1 = localStorage.getItem(V1_KEY)
-      if (v1) {
-        const parsed: unknown = JSON.parse(v1)
-        const snapshot = migrateV1(Array.isArray(parsed) ? parsed : [])
-        await this.save(snapshot)
-        return snapshot
-      }
+      const v3 = parse(localStorage.getItem(V3_KEY))
+      if (isSnapshot(v3)) return v3
+      // One-time upgrades. Older keys are left in place so an older build still works.
+      const v2 = parse(localStorage.getItem(V2_KEY))
+      if (isSnapshotV2(v2)) return upgraded(migrateV2(v2))
+      const v1 = parse(localStorage.getItem(V1_KEY))
+      if (v1) return upgraded(migrateV2(migrateV1(Array.isArray(v1) ? v1 : [])))
       return null
     } catch {
       return null
@@ -47,15 +47,28 @@ export const localStorageRepository: Repository = {
   },
   async save(snapshot) {
     try {
-      localStorage.setItem(V2_KEY, JSON.stringify(snapshot))
+      localStorage.setItem(V3_KEY, JSON.stringify(snapshot))
     } catch {
       // Storage quota / private mode — the in-memory state still works for the session.
     }
   },
 }
 
-function isSnapshot(v: unknown): v is Snapshot {
+async function upgraded(snapshot: Snapshot): Promise<Snapshot> {
+  await localStorageRepository.save(snapshot)
+  return snapshot
+}
+
+const parse = (raw: string | null): unknown => (raw ? JSON.parse(raw) : null)
+
+function isSnapshotV2(v: unknown): v is SnapshotV2 {
   if (typeof v !== 'object' || v === null) return false
   const s = v as Record<string, unknown>
   return Array.isArray(s.tasks) && Array.isArray(s.spaces) && Array.isArray(s.routines)
+}
+
+function isSnapshot(v: unknown): v is Snapshot {
+  if (!isSnapshotV2(v)) return false
+  const s = v as unknown as Record<string, unknown>
+  return Array.isArray(s.checkIns) && Array.isArray(s.tombstones)
 }
