@@ -35,7 +35,11 @@ export default defineConfig({
     }),
   ],
   server: {
-    // `npm run server` (or `railway run npm run server`) on :3000 answers the API in dev.
-    proxy: { '/api': 'http://localhost:3000' },
+    // `npm run server` on :3000 answers the API in dev. Point API_PROXY at the
+    // production URL to sign this browser in against the real server instead
+    // (e.g. to seed it from a localhost tab that holds your data).
+    proxy: {
+      '/api': { target: process.env.API_PROXY ?? 'http://localhost:3000', changeOrigin: true },
+    },
   },
 })

@@ -14,7 +14,7 @@ npm test           # vitest (domain logic, sync merge)
 npm run lint       # oxlint
 ```
 
-The app runs without the server (everything works from local storage; the badge shows "Offline"). To develop against real data, `railway run npm run server` starts the server with the production variables.
+The app runs without the server (everything works from local storage; the badge shows "Offline"). `API_PROXY=https://brian-tasks-production.up.railway.app npm run dev` proxies `/api` to production instead, which signs the localhost tab in against the real server — handy to seed it from a browser that already holds data.
 
 ## Layout
 
