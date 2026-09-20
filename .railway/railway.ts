@@ -16,6 +16,7 @@ export default defineRailway(() => {
     healthcheckTimeout: 60,
     env: {
       NODE_ENV: 'production',
+      PORT: '3000', // the generated domain (`railway domain --port 3000`) targets this
       DATABASE_URL: db.env.DATABASE_URL,
       APP_PASSWORD: preserve(),
       SESSION_SECRET: preserve(),
