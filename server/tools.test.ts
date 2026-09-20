@@ -84,14 +84,19 @@ beforeEach(async () => {
   ]
   for (const t of tasks) seed.push(liveRow('task', t.id, t))
   records = memoryRecords(seed)
+  client = await connect(ticking())
+})
 
+/** A client over a fresh server on `records`, reading time from `clock`. */
+async function connect(clock: () => Date): Promise<Client> {
   const server = new McpServer({ name: 'test', version: '0' })
-  registerTools(server, records, ticking())
+  registerTools(server, records, clock)
   const [clientSide, serverSide] = InMemoryTransport.createLinkedPair()
   await server.connect(serverSide)
-  client = new Client({ name: 'test-client', version: '0' })
-  await client.connect(clientSide)
-})
+  const c = new Client({ name: 'test-client', version: '0' })
+  await c.connect(clientSide)
+  return c
+}
 
 async function call(name: string, args: Record<string, unknown> = {}) {
   const res = (await client.callTool({ name, arguments: args })) as CallToolResult
@@ -112,6 +117,96 @@ describe('today', () => {
     expect(data.today.map((t: { id: string; reason: string }) => [t.id, t.reason])).toEqual([['b', 'scheduled']])
     expect(data.pinned).toEqual([])
     expect(data.inProgress).toEqual([])
+  })
+
+  it('reports no blocks, no placements and open time when the week is empty', async () => {
+    const { data } = await call('today')
+    expect(data).toMatchObject({ blocks: [], placements: [], now: null })
+    expect(data.routines[0].at).toBeUndefined()
+  })
+
+  describe('with blocks', () => {
+    const t0 = '2026-09-14T00:00:00.000Z'
+    /** Sunday blocks in the week of NOW. */
+    const block = (id: string, name: string, start: number, end: number, routineIds: string[] = []): Block => ({
+      id,
+      name,
+      colour: '#64748b',
+      weekday: 0,
+      start,
+      end,
+      from: '2026-09-14',
+      routineIds,
+      createdAt: t0,
+      updatedAt: t0,
+    })
+    const placement = (id: string, taskId: string, rest: Partial<Placement> = {}): Placement => ({
+      id,
+      taskId,
+      date: TODAY,
+      createdAt: t0,
+      updatedAt: t0,
+      ...rest,
+    })
+    const at = (h: number, m = 0) => () => new Date(2026, 8, 20, h, m, 0)
+
+    beforeEach(async () => {
+      await records.put([
+        liveRow('block', 'k1', block('k1', 'Morning', 6 * 60, 8 * 60, ['r1'])),
+        liveRow('block', 'k2', block('k2', 'Job', 9 * 60, 17 * 60)),
+        // Last week's version of Job: not in force this week (ADR 0003).
+        liveRow('block', 'k0', { ...block('k0', 'Job', 8 * 60, 16 * 60), from: '2026-09-07', until: '2026-09-14' }),
+        // A Saturday block never shows on Sunday.
+        liveRow('block', 'k3', { ...block('k3', 'Gym', 10 * 60, 11 * 60), weekday: 6 }),
+        liveRow('placement', 'p1', placement('p1', 'b', { blockId: 'k1' })),
+        liveRow('placement', 'p2', placement('p2', 'a', { blockId: 'k1', start: 7 * 60, end: 7 * 60 + 30 })),
+        liveRow('placement', 'p3', placement('p3', 'c', { start: 14 * 60, end: 15 * 60 })),
+        // Untimed and not in a block on this day: not drawn anywhere.
+        liveRow('placement', 'p4', placement('p4', 'a', { blockId: 'k3' })),
+        liveRow('placement', 'p5', placement('p5', 'b', { date: '2026-09-21', start: 9 * 60, end: 10 * 60 })),
+      ])
+    })
+
+    it('lists the blocks in force on the day with their routines and placed tasks', async () => {
+      const { data } = await call('today')
+      expect(data.blocks).toEqual([
+        {
+          name: 'Morning',
+          start: '06:00',
+          end: '08:00',
+          routines: ['Read 20 pages'],
+          // Timed ones first, then "sometime during this block" (TB-8, TB-11).
+          tasks: [
+            expect.objectContaining({ id: 'a', title: 'Overdue report', start: '07:00', end: '07:30' }),
+            expect.objectContaining({ id: 'b', title: 'Plan week' }),
+          ],
+        },
+        { name: 'Job', start: '09:00', end: '17:00', routines: [], tasks: [] },
+      ])
+      expect(data.blocks[0].tasks[1].start).toBeUndefined()
+      // Timed and outside any block; a done task stays listed (TB-16).
+      expect(data.placements).toEqual([expect.objectContaining({ id: 'c', status: 'done', start: '14:00', end: '15:00' })])
+      // The routine the Morning block links gets the block's hour (TB-20).
+      expect(data.routines[0]).toMatchObject({ title: 'Read 20 pages', at: '06:00' })
+    })
+
+    it('names the block under way, and none at the exact minute it ends', async () => {
+      client = await connect(at(7, 59))
+      expect((await call('today')).data.now).toEqual({ name: 'Morning', until: '08:00' })
+      client = await connect(at(8))
+      expect((await call('today')).data.now).toBeNull()
+      client = await connect(at(9))
+      expect((await call('today')).data.now).toEqual({ name: 'Job', until: '17:00' })
+      client = await connect(at(17))
+      expect((await call('today')).data.now).toBeNull()
+    })
+
+    it('leaves now out for any day but the clock’s today', async () => {
+      const { data } = await call('today', { date: '2026-09-21' })
+      expect('now' in data).toBe(false)
+      expect(data.blocks).toEqual([])
+      expect(data.placements).toEqual([expect.objectContaining({ id: 'b', start: '09:00', end: '10:00' })])
+    })
   })
 })
 

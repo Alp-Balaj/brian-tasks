@@ -248,6 +248,31 @@ interface RoutineView {
   streak: number
   note?: string
   archived?: boolean
+  /** The hour of the Block that links it today. */
+  at?: string
+}
+
+/** A Task placed on the day; `start`/`end` (HH:MM) when it is at an hour. */
+type PlacedView = TaskView & { start?: string; end?: string }
+
+interface BlockView {
+  name: string
+  start: string
+  end: string
+  routines: string[]
+  tasks: PlacedView[]
+}
+
+interface TodayView {
+  date: string
+  /** Only on the clock's today: the Block under way, or null in open time. */
+  now?: { name: string; until: string } | null
+  blocks: BlockView[]
+  placements: PlacedView[]
+  routines: RoutineView[]
+  pinned: TaskView[]
+  today: TaskView[]
+  inProgress: TaskView[]
 }
 
 function print<T>(data: unknown, fn: (d: T) => void): void {
@@ -295,11 +320,25 @@ function printRoutines(routines: RoutineView[]): void {
   for (const r of routines) {
     const mark = r.done ? '[x]' : r.scheduledToday ? '[ ]' : ' - '
     const streak = r.streak > 0 ? `streak ${r.streak}` : ''
-    console.log([mark, r.id.padEnd(10), r.title.padEnd(28), r.schedule.padEnd(16), streak, r.note].filter(Boolean).join(' '))
+    const at = r.at && `at ${r.at}`
+    console.log([mark, r.id.padEnd(10), r.title.padEnd(28), r.schedule.padEnd(16), at, streak, r.note].filter(Boolean).join(' '))
   }
 }
 
-function printToday(d: { date: string; routines: RoutineView[]; pinned: TaskView[]; today: TaskView[]; inProgress: TaskView[] }): void {
+/** A placed task: its hour when it has one, then the usual task line. */
+const placedLine = (t: PlacedView): string => (t.start ? `${t.start}–${t.end}  ${taskLine(t)}` : `             ${taskLine(t)}`)
+
+/** The day's strip as Home draws it (TB-20): each Block with what is inside it, then timed placements outside any Block. */
+function printBlocks(blocks: BlockView[], placements: PlacedView[]): void {
+  for (const b of blocks) {
+    const routines = b.routines.length ? `  · ${b.routines.join(', ')}` : ''
+    console.log(`${b.start}–${b.end}  ${b.name}${routines}`)
+    for (const t of b.tasks) console.log(`    ${placedLine(t)}`)
+  }
+  for (const t of placements) console.log(placedLine(t))
+}
+
+function printToday(d: TodayView): void {
   console.log(`Today, ${d.date}\n`)
   const section = (title: string, body: () => void, count: number) => {
     if (count === 0) return
@@ -307,11 +346,15 @@ function printToday(d: { date: string; routines: RoutineView[]; pinned: TaskView
     body()
     console.log()
   }
+  const strip = d.blocks.length + d.placements.length
+  if (d.now) console.log(`Now · ${d.now.name} until ${d.now.until}\n`)
+  else if (d.now === null && strip > 0) console.log('Now · Open time\n')
+  section('Blocks', () => printBlocks(d.blocks, d.placements), strip)
   section('Routines', () => printRoutines(d.routines), d.routines.length)
   section('Pinned', () => printTasks(d.pinned), d.pinned.length)
   section('Today', () => printTasks(d.today), d.today.length)
   section('In progress', () => printTasks(d.inProgress), d.inProgress.length)
-  if (!d.routines.length && !d.pinned.length && !d.today.length && !d.inProgress.length) console.log('Nothing on. Enjoy.')
+  if (!strip && !d.routines.length && !d.pinned.length && !d.today.length && !d.inProgress.length) console.log('Nothing on. Enjoy.')
 }
 
 main().catch((err: unknown) => {
