@@ -17,7 +17,14 @@ import {
   type TaskPatch,
   type TaskStatus,
 } from '../src/domain/task.ts'
-import { defaultSpace, nextFreeColour, SPACE_COLOUR_NAMES, type Space, type SpaceColourName } from '../src/domain/space.ts'
+import {
+  DEFAULT_SPACE_ID,
+  defaultSpace,
+  nextFreeColour,
+  SPACE_COLOUR_NAMES,
+  type Space,
+  type SpaceColourName,
+} from '../src/domain/space.ts'
 import {
   checkInId,
   currentStreak,
@@ -69,7 +76,7 @@ import type { Row } from './db.ts'
 
 export const INSTRUCTIONS = `Brian Tasks is a single-person task manager.
 Vocabulary: a Task has a Status (todo, in-progress, hold, done), a Priority (low, normal, high, urgent), optional Tags, an optional Due date (hard deadline) and Scheduled date (the day to work on it), and lives in exactly one Space (Personal, Work, ...). A Pinned Task shows on Home. Archived Tasks are hidden everywhere but the Archive. A Routine is something done repeatedly on a schedule; it is never finished, only checked in for a day. A Block is a named, coloured span of one day on the Week page (Job 09:00–17:00); a standing Block carries to every following week, a one-off Block is for its week only. Blocks can be listed, created, changed and deleted here; a change to a standing Block applies from a week on and past weeks keep what they had. A Placement is a Task put on a specific day, inside a Block and/or at an hour; \`today\` reports them, nothing here changes them.
-Dates are calendar dates, YYYY-MM-DD, in the user's local time; times are HH:MM. Start with \`today\` to see what matters right now. Tasks are never deleted from here: archive them instead. Spaces can be created and renamed here, never deleted.`
+Dates are calendar dates, YYYY-MM-DD, in the user's local time; times are HH:MM. Start with \`today\` to see what matters right now. Deleting a Task, Routine, Space or Block is permanent and the app only offers it from the Archive: prefer archiving (update_task archived: true) unless the user asks to delete, and say what will go before deleting. Personal, the default Space, can never be deleted; deleting another Space moves its Tasks to Personal.`
 
 const STATUS_RANK: Record<TaskStatus, number> = { todo: 0, 'in-progress': 1, hold: 2, done: 3 }
 
@@ -368,6 +375,26 @@ export function registerTools(server: McpServer, records: Records, clock: Clock 
   )
 
   server.registerTool(
+    'delete_task',
+    {
+      title: 'Delete Task',
+      description:
+        'Permanently delete a Task and its Placements on the Week page. This cannot be undone; the app only offers it from the Archive. Unless the user asks to delete, prefer update_task with archived: true, which hides the Task but keeps it.',
+      inputSchema: { id: z.string() },
+      annotations: { destructiveHint: true, idempotentHint: true },
+    },
+    async ({ id }) => {
+      const [tasks, placements] = await Promise.all([records.tasks(), records.placements()])
+      const task = tasks.find((t) => t.id === id)
+      if (!task) return fail(`No Task with id ${id}`)
+      const ts = now()
+      const placed = placements.filter((p) => p.taskId === id)
+      await records.put([tombstone('task', id, ts), ...placed.map((p) => tombstone('placement', p.id, ts))])
+      return ok({ id, title: task.title, deleted: true, ...(placed.length > 0 && { placementsRemoved: placed.length }) })
+    },
+  )
+
+  server.registerTool(
     'list_spaces',
     {
       title: 'List Spaces',
@@ -409,7 +436,7 @@ export function registerTools(server: McpServer, records: Records, clock: Clock 
     'update_space',
     {
       title: 'Update Space',
-      description: 'Rename or recolour a Space. Spaces are never deleted from here; that stays in the app.',
+      description: 'Rename or recolour a Space.',
       inputSchema: {
         space: spaceRef,
         name: z.string().min(1).optional(),
@@ -433,6 +460,28 @@ export function registerTools(server: McpServer, records: Records, clock: Clock 
       }
       await records.put([{ kind: 'space', id: next.id, updatedAt: next.updatedAt, deleted: false, data: next }])
       return ok(spaceView(next))
+    },
+  )
+
+  server.registerTool(
+    'delete_space',
+    {
+      title: 'Delete Space',
+      description:
+        'Delete a Space. Its Tasks (archived ones included) move to Personal, which can never be deleted. This cannot be undone.',
+      inputSchema: { space: spaceRef },
+      annotations: { destructiveHint: true, idempotentHint: true },
+    },
+    async ({ space: ref }) => {
+      const [tasks, spaces] = await Promise.all([records.tasks(), spaceList()])
+      const space = findSpace(spaces, ref)
+      if (!space) return noSpace(ref, spaces)
+      if (space.id === DEFAULT_SPACE_ID) return fail(`"${space.name}" is the default Space and cannot be deleted`)
+      const ts = now()
+      // Q16 as the app does it: the Tasks are re-homed, not deleted with the Space.
+      const moved = tasks.filter((t) => t.spaceId === space.id).map((t) => applyPatch(t, { spaceId: DEFAULT_SPACE_ID }, ts))
+      await records.put([tombstone('space', space.id, ts), ...moved.map((t) => live('task', t))])
+      return ok({ id: space.id, name: space.name, deleted: true, ...(moved.length > 0 && { tasksMoved: moved.length }) })
     },
   )
 
@@ -490,9 +539,36 @@ export function registerTools(server: McpServer, records: Records, clock: Clock 
       const routine = findRoutine(routines, ref)
       if (!routine) return noRoutine(ref, routines)
       if (!routine.checkIns.includes(date)) return ok({ ...routineView(routine, date), alreadyUnchecked: true })
-      await records.put([{ kind: 'checkin', id: checkInId(routine.id, date), updatedAt: now(), deleted: true, data: null }])
+      await records.put([tombstone('checkin', checkInId(routine.id, date), now())])
       const without: Routine = { ...routine, checkIns: routine.checkIns.filter((d) => d !== date) }
       return ok(routineView(without, date))
+    },
+  )
+
+  server.registerTool(
+    'delete_routine',
+    {
+      title: 'Delete Routine',
+      description:
+        'Permanently delete a Routine and every Check-in it ever had. Blocks that listed it simply stop listing it. This cannot be undone; the app only offers it from the Archive.',
+      inputSchema: { routine: z.string().describe('Routine title (case-insensitive) or id') },
+      annotations: { destructiveHint: true, idempotentHint: true },
+    },
+    async ({ routine: ref }) => {
+      const routines = await routineList()
+      const routine = findRoutine(routines, ref)
+      if (!routine) return noRoutine(ref, routines)
+      const ts = now()
+      await records.put([
+        tombstone('routine', routine.id, ts),
+        ...routine.checkIns.map((date) => tombstone('checkin', checkInId(routine.id, date), ts)),
+      ])
+      return ok({
+        id: routine.id,
+        title: routine.title,
+        deleted: true,
+        ...(routine.checkIns.length > 0 && { checkInsRemoved: routine.checkIns.length }),
+      })
     },
   )
 
@@ -562,9 +638,9 @@ export function registerTools(server: McpServer, records: Records, clock: Clock 
       /** Scheduled follows the earliest placement left, never cleared (TB-17, D9). */
       rows(tasks: Task[], deletedBlocks: string[] = []): Row[] {
         const rows: Row[] = [...blocks.values()].map((b) => live('block', b))
-        for (const id of deletedBlocks) rows.push({ kind: 'block', id, updatedAt: ts, deleted: true, data: null })
+        for (const id of deletedBlocks) rows.push(tombstone('block', id, ts))
         for (const p of self.placements) if (changed.has(p.id)) rows.push(live('placement', p))
-        for (const id of removed.keys()) rows.push({ kind: 'placement', id, updatedAt: ts, deleted: true, data: null })
+        for (const id of removed.keys()) rows.push(tombstone('placement', id, ts))
         for (const id of touched) {
           const task = tasks.find((t) => t.id === id)
           if (!task) continue
@@ -791,6 +867,9 @@ const live = (kind: string, data: { id: string; updatedAt: string }): Row => ({
   deleted: false,
   data,
 })
+
+/** A tombstone for a record: the row every Device will bury it on. */
+const tombstone = (kind: string, id: string, updatedAt: string): Row => ({ kind, id, updatedAt, deleted: true, data: null })
 
 const ok = (data: unknown): CallToolResult => ({ content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] })
 

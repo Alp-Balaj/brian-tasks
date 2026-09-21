@@ -279,6 +279,29 @@ describe('update_task', () => {
   })
 })
 
+describe('delete_task', () => {
+  it('buries the Task and its Placements, and leaves everything else', async () => {
+    const t0 = '2026-09-14T00:00:00.000Z'
+    await records.put([
+      liveRow('placement', 'pa', { id: 'pa', taskId: 'a', date: TODAY, createdAt: t0, updatedAt: t0 }),
+      liveRow('placement', 'pb', { id: 'pb', taskId: 'b', date: TODAY, createdAt: t0, updatedAt: t0 }),
+    ])
+    const { data } = await call('delete_task', { id: 'a' })
+    expect(data).toEqual({ id: 'a', title: 'Overdue report', deleted: true, placementsRemoved: 1 })
+    expect(records.rows.get('task:a')).toMatchObject({ deleted: true, data: null })
+    expect(records.rows.get('placement:pa')).toMatchObject({ deleted: true, data: null })
+    expect(records.rows.get('placement:pb')!.deleted).toBe(false)
+    expect((await call('get_task', { id: 'a' })).isError).toBe(true)
+    expect((await call('today')).data.overdue).toEqual([])
+  })
+
+  it('deletes an archived Task too, and fails on an unknown id', async () => {
+    expect((await call('delete_task', { id: 'd' })).data).toEqual({ id: 'd', title: 'Hidden', deleted: true })
+    expect((await call('list_tasks', { status: 'all', include_archived: true })).data.count).toBe(3)
+    expect((await call('delete_task', { id: 'd' })).isError).toBe(true)
+  })
+})
+
 describe('routines', () => {
   it('check_in by title is idempotent and extends the streak', async () => {
     const first = await call('check_in', { routine: 'read 20 pages' })
@@ -294,6 +317,18 @@ describe('routines', () => {
     expect(data.done).toBe(false)
     expect(records.rows.get(`checkin:r2:${TODAY}`)).toMatchObject({ deleted: true, data: null })
     expect(records.rows.get('checkin:r1:2026-09-19')!.deleted).toBe(false)
+  })
+
+  it('delete_routine buries the Routine and every Check-in it had, by title or id', async () => {
+    await call('check_in', { routine: 'Read 20 pages' })
+    const { data } = await call('delete_routine', { routine: 'read 20 PAGES' })
+    expect(data).toEqual({ id: 'r1', title: 'Read 20 pages', deleted: true, checkInsRemoved: 2 })
+    expect(records.rows.get('routine:r1')).toMatchObject({ deleted: true, data: null })
+    expect(records.rows.get('checkin:r1:2026-09-19')).toMatchObject({ deleted: true, data: null })
+    expect(records.rows.get(`checkin:r1:${TODAY}`)).toMatchObject({ deleted: true, data: null })
+    expect((await call('list_routines')).data.map((r: { id: string }) => r.id)).toEqual(['r2'])
+    expect((await call('delete_routine', { routine: 'r2' })).data).toEqual({ id: 'r2', title: 'Gym', deleted: true })
+    expect((await call('delete_routine', { routine: 'Gym' })).isError).toBe(true)
   })
 
   it('list_routines shows schedule and today state', async () => {
@@ -344,6 +379,28 @@ describe('spaces', () => {
     expect(stored).toMatchObject({ name: 'Job', colour: '#2a8fa8', order: 1 })
     sameDay(stored.updatedAt)
     expect((await call('update_space', { space: 'w1', colour: 'grey' })).data).toMatchObject({ name: 'Job', colour: 'grey' })
+  })
+
+  it('delete_space buries the Space and moves its Tasks to Personal, archived ones included', async () => {
+    await call('update_task', { id: 'd', space: 'Work' })
+    const { data } = await call('delete_space', { space: 'work' })
+    expect(data).toEqual({ id: 'w1', name: 'Work', deleted: true, tasksMoved: 2 })
+    expect(records.rows.get('space:w1')).toMatchObject({ deleted: true, data: null })
+    const a = records.rows.get('task:a')!.data as Task
+    expect(a.spaceId).toBe('personal')
+    sameDay(a.updatedAt)
+    expect((records.rows.get('task:d')!.data as Task).spaceId).toBe('personal')
+    expect((records.rows.get('task:b')!.data as Task).updatedAt).toBe('2026-09-10T00:00:00.000Z')
+    expect((await call('list_spaces')).data.map((s: { name: string }) => s.name)).toEqual(['Personal'])
+    expect((await call('get_task', { id: 'a' })).data.space).toBe('Personal')
+  })
+
+  it('delete_space refuses Personal and an unknown Space', async () => {
+    const personal = await call('delete_space', { space: 'Personal' })
+    expect(personal.isError).toBe(true)
+    expect(personal.text).toContain('default Space')
+    expect(records.rows.get('space:personal')!.deleted).toBe(false)
+    expect((await call('delete_space', { space: 'Nope' })).isError).toBe(true)
   })
 
   it('update_space refuses a name another Space has, and an unknown Space', async () => {
