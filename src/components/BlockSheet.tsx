@@ -6,7 +6,7 @@ import { useTasks } from '../store/tasks'
 import { useSpaces } from '../store/spaces'
 import { Sheet } from './Sheet'
 import { TaskPicker } from './TaskPicker'
-import { BackTitle, DayChips, TimeRange } from './PlacementSheet'
+import { BackTitle, DayChips, DayToggles, TimeRange } from './PlacementSheet'
 import { Switch } from './TaskEditor'
 import { TaskRow } from './TaskRow'
 import { SpaceDot } from './TaskCard'
@@ -15,7 +15,7 @@ import { Button, Chip, ChipButton, CircleCheck, IconButton, SectionLabel, field 
 import { formatDay } from '../lib/dates'
 import { useToday } from '../lib/useToday'
 import type { ISODate, Task } from '../domain/task'
-import { WEEKDAY_SHORT, hasCheckIn, type Routine } from '../domain/routine'
+import { WEEKDAY_SHORT, hasCheckIn, type Routine, type Weekday } from '../domain/routine'
 import {
   BLOCK_COLOURS,
   blockNames,
@@ -43,8 +43,10 @@ interface Props {
   onClose: () => void
 }
 
-/** What the form edits: the same five fields whether it is a draft or a stored block. */
-type Fields = Pick<Block, 'name' | 'colour' | 'weekday' | 'start' | 'end'>
+/** What the form edits the same way for a draft and a stored block. The day differs: a stored block has one, a draft any number. */
+type Fields = Pick<Block, 'name' | 'colour' | 'start' | 'end'>
+/** A new block's draft: `days` is every weekday it will be added on, Monday first. */
+type Draft = Omit<NewBlock, 'weekday'> & { days: Weekday[] }
 
 /** The sheet's own pages: the form, or one of the two pickers in its place. */
 type Page = 'form' | 'task' | 'routine'
@@ -55,6 +57,8 @@ type Page = 'form' | 'task' | 'routine'
  * a standing block at this week and the sheet follows the version the edit landed on.
  * There is deliberately no "this / future / all" question. A new block is a draft
  * until "Add", like RoutineEditor; its Routines and Tasks are linked once it exists.
+ * The draft can pick several days: "Add" then creates one block per day, since a Block
+ * is a span of one day (TB-7) — they share nothing afterwards.
  */
 export function BlockSheet({ blockId, date, preset, onClose }: Props) {
   const week = weekOf(date)
@@ -73,16 +77,19 @@ export function BlockSheet({ blockId, date, preset, onClose }: Props) {
   const addPlacement = useBlocks((s) => s.addPlacement)
   const routines = useRoutines((s) => s.routines)
 
-  const [draft, setDraft] = useState<NewBlock>(() => ({
-    name: '',
-    colour: nextFreeBlockColour(blocks),
-    weekday: weekdayOf(date),
-    start: 540,
-    end: 600,
-    week,
-    carry: false, // TB-4: one-off by default
-    ...preset,
-  }))
+  const [draft, setDraft] = useState<Draft>(() => {
+    const { weekday, ...rest } = preset ?? {}
+    return {
+      name: '',
+      colour: nextFreeBlockColour(blocks),
+      days: [weekday ?? weekdayOf(date)],
+      start: 540,
+      end: 600,
+      week,
+      carry: false, // TB-4: one-off by default
+      ...rest,
+    }
+  })
   const [page, setPage] = useState<Page>('form')
 
   const isNew = blockId === null
@@ -91,7 +98,8 @@ export function BlockSheet({ blockId, date, preset, onClose }: Props) {
   const value: Fields = isNew ? draft : block!
   const carry = isNew ? draft.carry === true : carries(block!)
   // The day this block falls on in the sheet's week — `date` no longer is once the weekday chip moves it.
-  const day = dateInWeek(week, value.weekday)
+  // Only a stored block has one; the pickers below need it and only open for a stored block.
+  const day = block ? dateInWeek(week, block.weekday) : date
   const names = blockNames(blocks)
 
   const follow = (landed: string | undefined) => {
@@ -106,10 +114,11 @@ export function BlockSheet({ blockId, date, preset, onClose }: Props) {
     else follow(setCarry(id!, week, on))
   }
 
-  const canAdd = draft.name.trim() !== '' && draft.start < draft.end
+  const canAdd = draft.name.trim() !== '' && draft.start < draft.end && draft.days.length > 0
   const submit = () => {
     if (!canAdd) return
-    addBlock({ ...draft, week })
+    const { days, ...fields } = draft
+    for (const weekday of days) addBlock({ ...fields, weekday, week })
     onClose()
   }
 
@@ -166,13 +175,13 @@ export function BlockSheet({ blockId, date, preset, onClose }: Props) {
               Cancel
             </Button>
             <Button type="submit" form="block-form" disabled={!canAdd}>
-              Add
+              {draft.days.length > 1 ? `Add ${draft.days.length} blocks` : 'Add'}
             </Button>
           </div>
         ) : (
           <div className="flex items-center justify-between gap-2">
             <span className="text-xs text-fg-faint">
-              {WEEKDAY_SHORT[value.weekday]} · {describeSpan(value.start, value.end)}
+              {WEEKDAY_SHORT[block!.weekday]} · {describeSpan(value.start, value.end)}
             </span>
             <Button variant="danger" onClick={remove}>
               {startsThisWeek ? 'Delete' : 'Remove from this week on'}
@@ -200,9 +209,16 @@ export function BlockSheet({ blockId, date, preset, onClose }: Props) {
           <ColourSwatches value={value.colour} onChange={(colour) => set({ colour })} />
         </Field>
 
-        <Field label="Day">
-          <DayChips value={value.weekday} onChange={(weekday) => set({ weekday })} />
-        </Field>
+        {isNew ? (
+          <Field label="Days">
+            <DayToggles value={draft.days} onChange={(days) => setDraft((d) => ({ ...d, days }))} />
+            {draft.days.length === 0 && <span className="px-1 text-xs text-fg-faint">Pick at least one day.</span>}
+          </Field>
+        ) : (
+          <Field label="Day">
+            <DayChips value={block!.weekday} onChange={(weekday) => set({ weekday })} />
+          </Field>
+        )}
 
         <Field label="Time">
           <TimeRange start={value.start} end={value.end} onChange={(span) => set(span)} />

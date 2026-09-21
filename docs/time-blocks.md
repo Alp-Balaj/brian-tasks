@@ -353,8 +353,10 @@ Fields, top to bottom:
 1. Name — `<input list="block-names">` + `<datalist>` from `blockNames(blocks)`; picking
    a known name sets the colour too (TB-3).
 2. Colour — 12 swatches (radiogroup), like the Space picker.
-3. Day — 7 chips (Mon…Sun); Time — two `<select>`s at 15-min steps (`00:00`…`24:00`),
-   end options filtered to `> start`.
+3. Day — 7 chips (Mon…Sun). A new block's chips are multi-select: "Add" creates one
+   block per chosen day (a Block is one day, TB-7), all with the same fields; an
+   existing block has one day and the chips move it. Time — two `<select>`s at 15-min
+   steps (`00:00`…`24:00`), end options filtered to `> start`.
 4. **Carry to next week** — `Switch`, `carries(block)`, `setCarry(id, week, on)`.
    Helper text when on and `from < week`: "Standing since {from}".
 5. **Routines** — rows with `CircleCheck` bound to today's check-in only (disabled with

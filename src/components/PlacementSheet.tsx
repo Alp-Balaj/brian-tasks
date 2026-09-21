@@ -290,6 +290,12 @@ export function BackTitle({ onBack, children }: { onBack: () => void; children: 
   )
 }
 
+/** One day chip; `DayChips` and `DayToggles` differ only in how many can be on. */
+const dayChip = (on: boolean) =>
+  `min-h-11 min-w-0 flex-1 rounded-lg border text-sm font-medium transition-colors ${
+    on ? 'border-fg bg-fg text-bg' : 'border-line-strong text-fg-muted hover:bg-surface-2'
+  }`
+
 /** Mon…Sun as one row of seven equal radio chips — no padding, so the row fits a phone. */
 export function DayChips({ value, onChange }: { value: Weekday; onChange: (weekday: Weekday) => void }) {
   return (
@@ -297,16 +303,27 @@ export function DayChips({ value, onChange }: { value: Weekday; onChange: (weekd
       {WEEKDAYS_MONDAY_FIRST.map((d) => {
         const on = d === value
         return (
-          <button
-            key={d}
-            type="button"
-            role="radio"
-            aria-checked={on}
-            onClick={() => onChange(d)}
-            className={`min-h-11 min-w-0 flex-1 rounded-lg border text-sm font-medium transition-colors ${
-              on ? 'border-fg bg-fg text-bg' : 'border-line-strong text-fg-muted hover:bg-surface-2'
-            }`}
-          >
+          <button key={d} type="button" role="radio" aria-checked={on} onClick={() => onChange(d)} className={dayChip(on)}>
+            {WEEKDAY_SHORT[d]}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+/** The same row with any number of days on. `value` comes back Monday-first. */
+export function DayToggles({ value, onChange }: { value: Weekday[]; onChange: (weekdays: Weekday[]) => void }) {
+  const toggle = (d: Weekday) => {
+    const next = value.includes(d) ? value.filter((x) => x !== d) : [...value, d]
+    onChange(WEEKDAYS_MONDAY_FIRST.filter((x) => next.includes(x)))
+  }
+  return (
+    <div role="group" aria-label="Days" className="flex gap-1">
+      {WEEKDAYS_MONDAY_FIRST.map((d) => {
+        const on = value.includes(d)
+        return (
+          <button key={d} type="button" aria-pressed={on} onClick={() => toggle(d)} className={dayChip(on)}>
             {WEEKDAY_SHORT[d]}
           </button>
         )
