@@ -34,4 +34,5 @@ export const CheckIcon = (p: IconProps) => <Svg d="M5 12.5 10 17l9-10" {...p} />
 export const CloseIcon = (p: IconProps) => <Svg d="M6 6l12 12M18 6 6 18" {...p} />
 export const ChevronDownIcon = (p: IconProps) => <Svg d="m6 9 6 6 6-6" {...p} />
 export const ChevronLeftIcon = (p: IconProps) => <Svg d="m15 6-6 6 6 6" {...p} />
+export const BellIcon = (p: IconProps) => <Svg d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4zM10 20a2 2 0 0 0 4 0" {...p} />
 export const ChevronRightIcon = (p: IconProps) => <Svg d="m9 6 6 6-6 6" {...p} />

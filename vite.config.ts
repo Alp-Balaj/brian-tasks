@@ -10,6 +10,10 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
+      // Our own worker (src/sw.ts, E8): the same precache as generateSW gave, plus push.
+      strategies: 'injectManifest',
+      srcDir: 'src',
+      filename: 'sw.ts',
       includeAssets: ['favicon.svg', 'icons.svg'],
       manifest: {
         name: 'Brian Tasks',
@@ -25,12 +29,10 @@ export default defineConfig({
           { src: '/icon-512-maskable.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
         ],
       },
-      workbox: {
+      injectManifest: {
         // Cache the app shell only. Data never goes through the service worker:
-        // it lives in localStorage and syncs through /api, which is left alone.
+        // it lives in localStorage and syncs through /api, which src/sw.ts leaves alone.
         globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
-        navigateFallback: '/index.html',
-        navigateFallbackDenylist: [/^\/api\//],
       },
     }),
   ],

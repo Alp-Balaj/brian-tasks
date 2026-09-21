@@ -5,6 +5,7 @@ import { serve } from '@hono/node-server'
 import { serveStatic } from '@hono/node-server/serve-static'
 import { migrate, pool, sync, type Row } from './db.ts'
 import { mcpApp } from './mcp.ts'
+import { migratePush, pushApp, startPushTick } from './push.ts'
 import { pgRecords } from './records.ts'
 import {
   clearFailures,
@@ -54,6 +55,8 @@ api.post('/sync', requireSession, async (c) => {
 
 // Claude (Code, Cowork, chat) talks to Brian here; its own token, not the cookie.
 api.route('/mcp', mcpApp(pgRecords))
+// A Device opts in to notifications here (PD-17); the cookie guards it.
+api.route('/push', pushApp())
 
 api.onError((err, c) => {
   console.error(err)
@@ -100,4 +103,8 @@ function isRow(v: unknown): v is Row {
 
 const port = Number(process.env.PORT ?? 3000)
 await migrate()
-serve({ fetch: app.fetch, port, hostname: '0.0.0.0' }, () => console.log(`brian-tasks listening on :${port}`))
+await migratePush()
+serve({ fetch: app.fetch, port, hostname: '0.0.0.0' }, () => {
+  console.log(`brian-tasks listening on :${port}`)
+  console.log(startPushTick(pgRecords) ? 'push notifications on' : 'push notifications off (no VAPID keys)')
+})

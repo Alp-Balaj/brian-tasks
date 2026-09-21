@@ -1,5 +1,6 @@
 import { useSync } from '../sync/status'
 import { logout, sync } from '../sync/engine'
+import { NotifyToggle } from './NotifyToggle'
 
 const LABEL = {
   unknown: 'Connecting…',
@@ -22,6 +23,7 @@ export function SyncBadge() {
       <button onClick={() => void logout()} className="ml-auto text-fg-faint hover:underline">
         Sign out
       </button>
+      <NotifyToggle className="-my-1" />
     </div>
   )
 }

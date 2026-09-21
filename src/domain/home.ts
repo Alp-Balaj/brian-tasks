@@ -36,7 +36,7 @@ export function todayReason(task: Task, today: ISODate): TodayReason | null {
  * qualifies for: Overdue, Today, Pinned, In progress. Done and archived tasks are left
  * out — Home is about what still needs you.
  */
-export function homeSections(tasks: Task[], today: ISODate): HomeSections {
+export function homeSections(tasks: readonly Task[], today: ISODate): HomeSections {
   const live = tasks.filter((t) => !t.archived && t.status !== 'done')
 
   const overdue: Task[] = []
