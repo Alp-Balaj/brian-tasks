@@ -16,6 +16,7 @@ import {
   STEP,
   blocksOn,
   dateInWeek,
+  defaultSpan,
   describeMinutes,
   describeSpan,
   weekOf,
@@ -37,11 +38,9 @@ interface Props {
 /** The draft of a new placement: a task, a day, and a block and/or a time (D3). */
 type Draft = Omit<NewPlacement, 'taskId'> & { taskId?: string }
 
-/** The one-hour default when a time is first set: the block's start, else 09:00. */
-const defaultSpan = (block?: Block): { start: Minutes; end: Minutes } => {
-  const start = block?.start ?? 540
-  return { start, end: Math.min(start + 60, block?.end ?? DAY) }
-}
+/** When a time is first set: from the block's start, else 09:00, as long as the Task's Estimate (PD-2). */
+const spanFor = (task?: Task, block?: Block): { start: Minutes; end: Minutes } =>
+  defaultSpan(block?.start ?? 540, task, block)
 
 /**
  * Put a Task on a day (§5.4): the phone form and desktop Path B (TB-13). Task, day,
@@ -92,7 +91,7 @@ export function PlacementSheet({ placementId, date, preset, onClose }: Props) {
     if (next === value.date) return
     if (block === undefined) set({ date: next })
     else if (blocksOn(blocks, next).some((b) => b.id === block.id)) set({ date: next })
-    else set({ date: next, blockId: undefined, ...(timed ? {} : defaultSpan()) })
+    else set({ date: next, blockId: undefined, ...(timed ? {} : spanFor(task)) })
   }
 
   const setBlock = (next?: Block) => {
@@ -195,7 +194,7 @@ export function PlacementSheet({ placementId, date, preset, onClose }: Props) {
               )}
             </div>
           ) : (
-            <ChipButton onClick={() => set(defaultSpan(block))} className="min-h-11 self-start">
+            <ChipButton onClick={() => set(spanFor(task, block))} className="min-h-11 self-start">
               Set a time…
             </ChipButton>
           )}

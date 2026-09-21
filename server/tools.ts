@@ -10,9 +10,16 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import {
   applyPatch,
   buildTask,
+  checklistProgress,
+  completeRepeating,
+  describeRepeat,
+  finishesRepeating,
+  REPEAT_UNITS,
   TASK_PRIORITIES,
   TASK_STATUSES,
+  type ChecklistItem,
   type ISODate,
+  type Repeat,
   type Task,
   type TaskPatch,
   type TaskStatus,
@@ -35,6 +42,7 @@ import {
   type RoutineRecord,
 } from '../src/domain/routine.ts'
 import { homeSections } from '../src/domain/home.ts'
+import { describeReview, weekReview } from '../src/domain/review.ts'
 import {
   appliesTo,
   BLOCK_COLOUR_NAMES,
@@ -46,6 +54,8 @@ import {
   currentBlock,
   dateInWeek,
   DAY,
+  defaultSpan,
+  shiftDate,
   describeMinutes,
   isTimed,
   movePlacements,
@@ -69,14 +79,14 @@ import {
   type PlacementChange,
   type WeekKey,
 } from '../src/domain/block.ts'
-import { WEEKDAY_SHORT, WEEKDAYS_MONDAY_FIRST, type Weekday } from '../src/domain/routine.ts'
+import { isMissed, WEEKDAY_SHORT, WEEKDAYS_MONDAY_FIRST, type Weekday } from '../src/domain/routine.ts'
 import { toISODate } from '../src/lib/dates.ts'
 import type { Records } from './records.ts'
 import type { Row } from './db.ts'
 
 export const INSTRUCTIONS = `Brian Tasks is a single-person task manager.
-Vocabulary: a Task has a Status (todo, in-progress, hold, done), a Priority (low, normal, high, urgent), optional Tags, an optional Due date (hard deadline) and Scheduled date (the day to work on it), and lives in exactly one Space (Personal, Work, ...). A Pinned Task shows on Home. Archived Tasks are hidden everywhere but the Archive. A Routine is something done repeatedly on a schedule; it is never finished, only checked in for a day. A Block is a named, coloured span of one day on the Week page (Job 09:00–17:00); a standing Block carries to every following week, a one-off Block is for its week only. Blocks can be listed, created, changed and deleted here; a change to a standing Block applies from a week on and past weeks keep what they had. A Placement is a Task put on a specific day, inside a Block and/or at an hour; \`today\` reports them, nothing here changes them.
-Dates are calendar dates, YYYY-MM-DD, in the user's local time; times are HH:MM. Start with \`today\` to see what matters right now. Deleting a Task, Routine, Space or Block is permanent and the app only offers it from the Archive: prefer archiving (update_task archived: true) unless the user asks to delete, and say what will go before deleting. Personal, the default Space, can never be deleted; deleting another Space moves its Tasks to Personal.`
+Vocabulary: a Task has a Status (todo, in-progress, hold, done), a Priority (low, normal, high, urgent), optional Tags, an optional Due date (hard deadline) and Scheduled date (the day to work on it), and lives in exactly one Space (Personal, Work, ...). A Pinned Task shows on Home. Archived Tasks are hidden everywhere but the Archive. A Routine is something done repeatedly on a schedule; it is never finished, only checked in for a day. A Block is a named, coloured span of one day on the Week page (Job 09:00–17:00); a standing Block carries to every following week, a one-off Block is for its week only. Blocks can be listed, created, changed and deleted here; a change to a standing Block applies from a week on and past weeks keep what they had. A Placement is a Task put on a specific day, inside a Block and/or at an hour (\`list_placements\`, \`place_task\`, \`update_placement\`, \`unplace\`); placing a Task makes it Scheduled for its earliest placed day. An appointment (dentist Thu 14:00) is a one-off Block named for it, made with \`create_block\`; there is no calendar import. A Task may carry an Estimate (minutes, one sitting; it sizes a timed Placement when only the start is given), a Checklist (flat steps), and a Repeat (every N days/weeks/months/years from its Due date or from completion): finishing a repeating Task keeps it done and creates the next occurrence.
+Dates are calendar dates, YYYY-MM-DD, in the user's local time; times are HH:MM. Start with \`today\` to see what matters right now. The prompts \`plan_day\` and \`close_day\` describe the morning and evening rituals; \`week_review\` reports what a week came to. Deleting a Task, Routine, Space or Block is permanent and the app only offers it from the Archive: prefer archiving (update_task archived: true) unless the user asks to delete, and say what will go before deleting. Personal, the default Space, can never be deleted; deleting another Space moves its Tasks to Personal.`
 
 const STATUS_RANK: Record<TaskStatus, number> = { todo: 0, 'in-progress': 1, hold: 2, done: 3 }
 
@@ -99,6 +109,17 @@ const clockTime = z
 const weekdayNames = WEEKDAYS_MONDAY_FIRST.map((d) => WEEKDAY_SHORT[d].toLowerCase()) as [string, ...string[]]
 const weekday = z.enum(weekdayNames).describe('Day of the week: mon … sun')
 const routineRefs = z.array(z.string()).describe('Routine titles (case-insensitive) or ids')
+const estimate = z.number().int().positive().describe('Minutes for one sitting; rounded to 15')
+const checklist = z
+  .array(z.union([z.string().min(1), z.object({ text: z.string().min(1), done: z.boolean().optional() })]))
+  .describe('The whole Checklist, in order; a string is an unticked item')
+const repeat = z
+  .object({
+    every: z.number().int().min(1).optional().describe('Default 1'),
+    unit: z.enum(REPEAT_UNITS),
+    from: z.enum(['due', 'done']).optional().describe("'due' (default): from the Due date; 'done': from the day it was finished"),
+  })
+  .describe('Comes back every N units. A repeating Task needs a Due date; today is used when it has none')
 
 type Clock = () => Date
 
@@ -146,10 +167,28 @@ export function registerTools(server: McpServer, records: Records, clock: Clock 
       ...(t.tags.length > 0 && { tags: t.tags }),
       ...(t.pinned && { pinned: true }),
       ...(t.archived && { archived: true }),
+      ...(t.estimate !== undefined && { estimate: t.estimate }),
+      ...(t.checklist && t.checklist.length > 0 && { checklist: full ? t.checklist : checklistProgress(t.checklist) }),
+      ...(t.repeat && { repeat: full ? t.repeat : describeRepeat(t.repeat) }),
       ...((full || t.description) && { description: t.description }),
       ...(full && { createdAt: t.createdAt, updatedAt: t.updatedAt, completedAt: t.completedAt }),
     })
   }
+
+  /** The Checklist a tool was given, keeping the ids of items whose text is unchanged (E3). */
+  const checklistFrom = (given: z.infer<typeof checklist>, current: ChecklistItem[] = []): ChecklistItem[] => {
+    const known = new Map(current.map((i) => [i.text, i.id]))
+    return given.map((item) => {
+      const text = (typeof item === 'string' ? item : item.text).trim()
+      const done = typeof item === 'string' ? false : (item.done ?? false)
+      const id = known.get(text) ?? nanoid(6)
+      known.delete(text)
+      return { id, text, done }
+    })
+  }
+
+  const repeatFrom = (given: z.infer<typeof repeat>): Repeat => ({ every: given.every ?? 1, unit: given.unit, from: given.from ?? 'due' })
+  const snapEstimate = (m: number) => Math.max(15, Math.round(m / 15) * 15)
 
   /** `at`: the earliest Block on `date` that links the Routine (TB-20), when `blocks` are that day's. */
   const routineView = (r: Routine, date: ISODate, blocks: Block[] = []) => {
@@ -256,6 +295,8 @@ export function registerTools(server: McpServer, records: Records, clock: Clock 
         tag: z.string().optional(),
         search: z.string().optional().describe('Case-insensitive match on title and description'),
         due_by: isoDate.optional().describe('Only Tasks due on or before this date'),
+        completed_since: isoDate.optional().describe('Only Tasks finished on or after this day; implies status done'),
+        completed_until: isoDate.optional().describe('Only Tasks finished on or before this day; implies status done'),
         include_archived: z.boolean().optional(),
       },
       annotations: { readOnlyHint: true },
@@ -267,14 +308,18 @@ export function registerTools(server: McpServer, records: Records, clock: Clock 
         space = findSpace(spaces, args.space)
         if (!space) return noSpace(args.space, spaces)
       }
-      const wanted = args.status ?? 'open'
+      const byCompletion = args.completed_since !== undefined || args.completed_until !== undefined
+      const wanted = args.status ?? (byCompletion ? 'done' : 'open')
       const search = args.search?.trim().toLowerCase()
+      const completedOn = (t: Task) => t.completedAt?.slice(0, 10)
       const matching = tasks
         .filter((t) => args.include_archived || !t.archived)
         .filter((t) => (wanted === 'all' ? true : wanted === 'open' ? t.status !== 'done' : t.status === wanted))
         .filter((t) => !space || t.spaceId === space.id)
         .filter((t) => !args.tag || t.tags.includes(args.tag))
         .filter((t) => !args.due_by || (t.due !== undefined && t.due <= args.due_by))
+        .filter((t) => !args.completed_since || (completedOn(t) ?? '') >= args.completed_since)
+        .filter((t) => !args.completed_until || (completedOn(t) !== undefined && completedOn(t)! <= args.completed_until))
         .filter((t) => !search || t.title.toLowerCase().includes(search) || t.description.toLowerCase().includes(search))
         .sort((a, b) => STATUS_RANK[a.status] - STATUS_RANK[b.status] || a.order - b.order)
       const view = taskView(spaces)
@@ -312,9 +357,12 @@ export function registerTools(server: McpServer, records: Records, clock: Clock 
         scheduled: isoDate.optional().describe('The day to work on it'),
         space: spaceRef.optional().describe('Defaults to Personal'),
         pinned: z.boolean().optional().describe('Show on Home'),
+        estimate: estimate.optional(),
+        checklist: checklist.optional(),
+        repeat: repeat.optional(),
       },
     },
-    async ({ space: ref, ...input }) => {
+    async ({ space: ref, estimate: minutes, checklist: items, repeat: rule, ...input }) => {
       const [tasks, spaces] = await Promise.all([records.tasks(), spaceList()])
       let spaceId: string | undefined
       if (ref) {
@@ -322,7 +370,19 @@ export function registerTools(server: McpServer, records: Records, clock: Clock 
         if (!space) return noSpace(ref, spaces)
         spaceId = space.id
       }
-      const task = buildTask({ ...input, spaceId }, nanoid(10), tasks, now())
+      const task = buildTask(
+        {
+          ...input,
+          spaceId,
+          ...(minutes !== undefined && { estimate: snapEstimate(minutes) }),
+          ...(items !== undefined && { checklist: checklistFrom(items) }),
+          // PD-4: a repeating Task always has a Due date.
+          ...(rule !== undefined && { repeat: repeatFrom(rule), due: input.due ?? today() }),
+        },
+        nanoid(10),
+        tasks,
+        now(),
+      )
       await records.put([{ kind: 'task', id: task.id, updatedAt: task.updatedAt, deleted: false, data: task }])
       return ok(taskView(spaces)(task, true))
     },
@@ -333,7 +393,7 @@ export function registerTools(server: McpServer, records: Records, clock: Clock 
     {
       title: 'Update Task',
       description:
-        'Change any fields of a Task. Set status to done to complete it; set archived to hide it. Pass null for due or scheduled to clear the date. Tags replace the whole list.',
+        'Change any fields of a Task. Set status to done to complete it (a Task with a Repeat then comes back as a new Task, returned as `next`); set archived to hide it. Pass null for due, scheduled, estimate or repeat to clear them. Tags and checklist replace the whole list; checklist items keep their id when their text is unchanged.',
       inputSchema: {
         id: z.string(),
         title: z.string().min(1).optional(),
@@ -346,6 +406,9 @@ export function registerTools(server: McpServer, records: Records, clock: Clock 
         space: spaceRef.optional(),
         pinned: z.boolean().optional(),
         archived: z.boolean().optional(),
+        estimate: estimate.nullable().optional(),
+        checklist: checklist.optional(),
+        repeat: repeat.nullable().optional(),
       },
       annotations: { destructiveHint: false, idempotentHint: true },
     },
@@ -354,6 +417,9 @@ export function registerTools(server: McpServer, records: Records, clock: Clock 
       const task = tasks.find((t) => t.id === args.id)
       if (!task) return fail(`No Task with id ${args.id}`)
       const patch: TaskPatch = {}
+      if (args.estimate !== undefined) patch.estimate = args.estimate === null ? undefined : snapEstimate(args.estimate)
+      if (args.checklist !== undefined) patch.checklist = checklistFrom(args.checklist, task.checklist)
+      if (args.repeat !== undefined) patch.repeat = args.repeat === null ? undefined : repeatFrom(args.repeat)
       if (args.title !== undefined) patch.title = args.title.trim()
       if (args.description !== undefined) patch.description = args.description
       if (args.status !== undefined) patch.status = args.status
@@ -368,9 +434,21 @@ export function registerTools(server: McpServer, records: Records, clock: Clock 
         if (!space) return noSpace(args.space, spaces)
         patch.spaceId = space.id
       }
-      const next = applyPatch(task, patch, now())
-      await records.put([{ kind: 'task', id: next.id, updatedAt: next.updatedAt, deleted: false, data: next }])
-      return ok(taskView(spaces)(next, true))
+      const ts = now()
+      const view = taskView(spaces)
+      if (finishesRepeating(task, patch)) {
+        // PD-5, E5: the same finish the app's store does.
+        const { status: _done, ...rest } = patch
+        const before = { ...applyPatch(task, rest, ts), repeat: task.repeat }
+        const { done, next } = completeRepeating(before, tasks, nanoid(10), ts, today())
+        await records.put([live('task', done), live('task', next)])
+        return ok({ ...view(done, true), next: view(next, true) })
+      }
+      // A repeating Task always has a Due date (PD-4).
+      if (patch.repeat !== undefined && (patch.due ?? task.due) === undefined) patch.due = today()
+      const next = applyPatch(task, patch, ts)
+      await records.put([live('task', next)])
+      return ok(view(next, true))
     },
   )
 
@@ -489,14 +567,28 @@ export function registerTools(server: McpServer, records: Records, clock: Clock 
     'list_routines',
     {
       title: 'List Routines',
-      description: 'Every Routine with its schedule, whether it is scheduled and done today, and its current streak.',
-      inputSchema: { include_archived: z.boolean().optional() },
+      description:
+        'Every Routine with its schedule, whether it is scheduled and done today, and its current streak. Pass days to add each Routine\'s history for the last N days: done, missed, open (today, not yet), or off (not scheduled).',
+      inputSchema: {
+        include_archived: z.boolean().optional(),
+        days: z.number().int().min(1).max(366).optional().describe('History length, ending today'),
+      },
       annotations: { readOnlyHint: true },
     },
-    async ({ include_archived }) => {
+    async ({ include_archived, days }) => {
       const date = today()
       const routines = (await routineList()).filter((r) => include_archived || !r.archived)
-      return ok(routines.map((r) => routineView(r, date)))
+      const history = (r: Routine) => {
+        if (!days) return {}
+        const out: Record<string, 'done' | 'missed' | 'open' | 'off'> = {}
+        for (let i = days - 1; i >= 0; i--) {
+          const d = shiftDate(date, -i)
+          const at = localDate(d)
+          out[d] = r.checkIns.includes(d) ? 'done' : isMissed(r, at, localDate(date)) ? 'missed' : isScheduledOn(r.schedule, at) ? 'open' : 'off'
+        }
+        return { history: out }
+      }
+      return ok(routines.map((r) => ({ ...routineView(r, date), ...history(r) })))
     },
   )
 
@@ -827,6 +919,267 @@ export function registerTools(server: McpServer, records: Records, clock: Clock 
       await records.put(e.rows(tasks))
       return ok({ id, name: block.name, removedFrom: week, ...e.counts() })
     },
+  )
+
+  // ---- Placements (PD-7) ------------------------------------------------------------
+  // The placement sheet's rules on records: a Placement is a Block and/or an hour (D3),
+  // the Task's Scheduled follows its earliest Placement and is never cleared (D9).
+
+  const placementView = (tasks: Task[], blocks: Block[], view: ReturnType<typeof taskView>) => {
+    const byId = new Map(tasks.map((t) => [t.id, t]))
+    return (p: Placement) => {
+      const task = byId.get(p.taskId)
+      const block = p.blockId ? blocks.find((b) => b.id === p.blockId) : undefined
+      return {
+        id: p.id,
+        date: p.date,
+        ...(isTimed(p) && { start: describeMinutes(p.start), end: describeMinutes(p.end) }),
+        ...(block && { block: block.name, blockId: block.id }),
+        task: task ? view(task) : { id: p.taskId, missing: true },
+      }
+    }
+  }
+
+  /** The Task row to write after its Placements changed (D9), if Scheduled moved. */
+  const rescheduled = (task: Task, placements: Placement[], ts: string): Row[] => {
+    const next = scheduledFromPlacements(task, placements)
+    return next !== undefined && next !== task.scheduled ? [live('task', applyPatch(task, { scheduled: next }, ts))] : []
+  }
+
+  /** A Block on `date` by name or id, or why not. */
+  const blockOn = (blocks: Block[], date: ISODate, ref: string): { block: Block } | { error: CallToolResult } => {
+    const onDay = blocksOn(blocks, date)
+    const wanted = ref.trim().toLowerCase()
+    const block = onDay.find((b) => b.id === ref) ?? onDay.find((b) => b.name.toLowerCase() === wanted)
+    if (block) return { block }
+    return { error: fail(`No Block "${ref}" on ${date}. Blocks that day: ${onDay.map((b) => b.name).join(', ') || '(none)'}`) }
+  }
+
+  server.registerTool(
+    'list_placements',
+    {
+      title: 'List Placements',
+      description:
+        'The Tasks placed on days in a date range (this week unless told otherwise): each Placement with its day, hour, Block and Task. Use the ids with update_placement and unplace.',
+      inputSchema: {
+        from: isoDate.optional().describe('Defaults to the Monday of this week'),
+        to: isoDate.optional().describe('Inclusive; defaults to the Sunday of the week of from'),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    async ({ from, to }) => {
+      const [tasks, spaces, blocks, placements] = await Promise.all([records.tasks(), spaceList(), records.blocks(), records.placements()])
+      const start = from ?? weekOf(today())
+      const end = to ?? shiftDate(weekOf(start), 6)
+      const inRange = placements
+        .filter((p) => p.date >= start && p.date <= end)
+        .sort((a, b) => a.date.localeCompare(b.date) || (a.start ?? Infinity) - (b.start ?? Infinity))
+      return ok({ from: start, to: end, count: inRange.length, placements: inRange.map(placementView(tasks, blocks, taskView(spaces))) })
+    },
+  )
+
+  server.registerTool(
+    'place_task',
+    {
+      title: 'Place Task',
+      description:
+        'Put a Task on a day: inside a Block (by name or id, one on that day) and/or at an hour. At least one of block and start. With a start and no end, the Placement is as long as the Task\'s Estimate, else one hour, never past the Block or the day. The Task becomes Scheduled for its earliest placed day. The same Task can be placed any number of times.',
+      inputSchema: {
+        id: z.string().describe('Task id'),
+        date: isoDate,
+        block: z.string().optional().describe('Block name (case-insensitive) or id on that day'),
+        start: clockTime.optional(),
+        end: clockTime.optional(),
+      },
+    },
+    async ({ id, date, block: ref, start, end }) => {
+      const [tasks, spaces, blocks, placements] = await Promise.all([records.tasks(), spaceList(), records.blocks(), records.placements()])
+      const task = tasks.find((t) => t.id === id)
+      if (!task) return fail(`No Task with id ${id}`)
+      let block: Block | undefined
+      if (ref !== undefined) {
+        const found = blockOn(blocks, date, ref)
+        if ('error' in found) return found.error
+        block = found.block
+      }
+      if (block === undefined && start === undefined) return fail('A Placement is a Block and/or an hour: pass block, start, or both (D3)')
+      let times: { start: Minutes; end: Minutes } | undefined
+      if (start !== undefined) {
+        const s = snap(parseMinutes(start))
+        const chosen = end === undefined ? defaultSpan(s, task, block) : span(start, end)
+        if ('error' in chosen) return chosen.error
+        times = chosen
+      }
+      const ts = now()
+      const placement: Placement = {
+        id: nanoid(10),
+        taskId: task.id,
+        date,
+        ...(block && { blockId: block.id }),
+        ...times,
+        createdAt: ts,
+        updatedAt: ts,
+      }
+      const all = [...placements, placement]
+      await records.put([live('placement', placement), ...rescheduled(task, all, ts)])
+      const scheduled = scheduledFromPlacements(task, all)
+      return ok({ ...placementView(tasks, blocks, taskView(spaces))(placement), scheduled })
+    },
+  )
+
+  server.registerTool(
+    'update_placement',
+    {
+      title: 'Update Placement',
+      description:
+        'Move a Placement to another day, another Block (null leaves the Block) or another hour (start null clears the hour). It must keep a Block or an hour. A Block link is dropped when the new day has no such Block.',
+      inputSchema: {
+        id: z.string().describe('Placement id'),
+        date: isoDate.optional(),
+        block: z.string().nullable().optional(),
+        start: clockTime.nullable().optional(),
+        end: clockTime.optional(),
+      },
+      annotations: { destructiveHint: false, idempotentHint: true },
+    },
+    async ({ id, date, block: ref, start, end }) => {
+      const [tasks, spaces, blocks, placements] = await Promise.all([records.tasks(), spaceList(), records.blocks(), records.placements()])
+      const current = placements.find((p) => p.id === id)
+      if (!current) return fail(`No Placement with id ${id}`)
+      const task = tasks.find((t) => t.id === current.taskId)
+      const day = date ?? current.date
+      let blockId: string | undefined = current.blockId
+      if (ref === null) blockId = undefined
+      else if (ref !== undefined) {
+        const found = blockOn(blocks, day, ref)
+        if ('error' in found) return found.error
+        blockId = found.block.id
+      } else if (blockId !== undefined && !blocksOn(blocks, day).some((b) => b.id === blockId)) blockId = undefined
+      let times: { start: Minutes; end: Minutes } | undefined = isTimed(current) ? { start: current.start, end: current.end } : undefined
+      if (start === null) times = undefined
+      else if (start !== undefined && end !== undefined) {
+        const chosen = span(start, end)
+        if ('error' in chosen) return chosen.error
+        times = chosen
+      } else if (start !== undefined) {
+        // A new start alone keeps the length it had (the sheet's rule), else PD-2's default.
+        const s = snap(parseMinutes(start))
+        const block = blockId ? blocks.find((b) => b.id === blockId) : undefined
+        times = times ? { start: s, end: Math.min(s + (times.end - times.start), DAY) } : defaultSpan(s, task, block)
+      } else if (end !== undefined) {
+        if (!times) return fail('Pass start with end')
+        const chosen = span(describeMinutes(times.start), end)
+        if ('error' in chosen) return chosen.error
+        times = chosen
+      }
+      if (blockId === undefined && times === undefined) return fail('A Placement is a Block and/or an hour; this would leave neither (D3)')
+      const ts = now()
+      const { blockId: _b, start: _s, end: _e, ...rest } = current
+      const next: Placement = { ...rest, date: day, ...(blockId && { blockId }), ...times, updatedAt: ts }
+      const all = placements.map((p) => (p.id === id ? next : p))
+      await records.put([live('placement', next), ...(task ? rescheduled(task, all, ts) : [])])
+      return ok(placementView(tasks, blocks, taskView(spaces))(next))
+    },
+  )
+
+  server.registerTool(
+    'unplace',
+    {
+      title: 'Unplace',
+      description: 'Remove one Placement. The Task keeps its Scheduled date unless an earlier Placement remains to move it (TB-17).',
+      inputSchema: { id: z.string().describe('Placement id') },
+      annotations: { destructiveHint: true, idempotentHint: true },
+    },
+    async ({ id }) => {
+      const [tasks, placements] = await Promise.all([records.tasks(), records.placements()])
+      const current = placements.find((p) => p.id === id)
+      if (!current) return fail(`No Placement with id ${id}`)
+      const task = tasks.find((t) => t.id === current.taskId)
+      const ts = now()
+      const rest = placements.filter((p) => p.id !== id)
+      await records.put([tombstone('placement', id, ts), ...(task ? rescheduled(task, rest, ts) : [])])
+      return ok({ id, removed: true, ...(task && { task: task.title, scheduled: scheduledFromPlacements(task, rest) ?? task.scheduled }) })
+    },
+  )
+
+  // ---- Looking back (PD-12, PD-13) --------------------------------------------------
+
+  server.registerTool(
+    'week_review',
+    {
+      title: 'Week Review',
+      description:
+        'What a week came to (this week unless told otherwise): Tasks finished that week by Space, each Routine\'s Check-ins over its scheduled days so far, and stale Placements (past days whose Task is still open). Drawn, not scored.',
+      inputSchema: { week: isoDate.optional().describe('Any date in the week; defaults to today') },
+      annotations: { readOnlyHint: true },
+    },
+    async ({ week: date = today() }) => {
+      const [tasks, spaces, routines, blocks, placements] = await Promise.all([
+        records.tasks(),
+        spaceList(),
+        routineList(),
+        records.blocks(),
+        records.placements(),
+      ])
+      const view = taskView(spaces)
+      const names = new Map(spaces.map((s) => [s.id, s.name]))
+      const r = weekReview(tasks, routines, blocks, placements, weekOf(date), today())
+      return ok({
+        week: r.week,
+        summary: describeReview(r),
+        done: r.done.map((g) => ({ space: names.get(g.spaceId) ?? g.spaceId, tasks: g.tasks.map((t) => ({ ...view(t), completedAt: t.completedAt })) })),
+        routines: r.routines.map((x) => ({ id: x.routine.id, title: x.routine.title, checked: x.checked, scheduled: x.scheduled })),
+        stale: r.stale.map((s) => ({
+          placementId: s.placement.id,
+          date: s.placement.date,
+          ...(isTimed(s.placement) && { start: describeMinutes(s.placement.start), end: describeMinutes(s.placement.end) }),
+          ...(s.block && { block: s.block.name }),
+          task: view(s.task),
+        })),
+      })
+    },
+  )
+
+  // ---- Rituals (PD-11) ---------------------------------------------------------------
+
+  server.registerPrompt(
+    'plan_day',
+    {
+      title: 'Plan the day',
+      description: 'The morning ritual: read the day, propose Placements for the open time, write only what the user agrees to.',
+      argsSchema: { date: z.string().optional().describe('Defaults to today') },
+    },
+    ({ date }) => ({
+      messages: [
+        {
+          role: 'user',
+          content: {
+            type: 'text',
+            text: `Plan ${date ?? 'today'} in Brian Tasks. Call \`today\`${date ? ` with date ${date}` : ''}, then \`list_blocks\` and \`list_placements\` for that day. Read the open time between the Blocks. Propose, in one short list, which of the overdue, due, scheduled, pinned and in-progress Tasks to place where (a Block by name, or an hour), using each Task's Estimate for length and leaving slack; say which Tasks you would leave for another day and why. Do not write anything yet. When the user agrees (possibly with changes), make the Placements with \`place_task\`, then show the day as \`today\` reports it.`,
+          },
+        },
+      ],
+    }),
+  )
+
+  server.registerPrompt(
+    'close_day',
+    {
+      title: 'Close the day',
+      description: 'The evening ritual: walk the Tasks still open on today and settle each as done, tomorrow, or later.',
+      argsSchema: { date: z.string().optional().describe('Defaults to today') },
+    },
+    ({ date }) => ({
+      messages: [
+        {
+          role: 'user',
+          content: {
+            type: 'text',
+            text: `Close ${date ?? 'today'} in Brian Tasks. Call \`today\`${date ? ` with date ${date}` : ''}. The open rows are the Tasks due that day or overdue, Scheduled that day, or placed that day and not done. Go through them briefly, one line each, asking whether it is done, moves to tomorrow, or later (next week, a chosen day, or unscheduled). Then apply the answers with \`update_task\`: done sets status done; tomorrow or later moves the date that put the Task on the day (due if it was due or overdue, else scheduled); unschedule clears scheduled. Leave Placements alone. Finish with one line saying the day is closed and what tomorrow already holds.`,
+          },
+        },
+      ],
+    }),
   )
 }
 

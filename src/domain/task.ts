@@ -15,6 +15,26 @@ export type ISODate = string
 /** Full timestamp as ISO 8601. */
 export type ISODateTime = string
 
+/** One line of a Task's Checklist (PD-3). Flat and ordered; ids so items can be toggled from anywhere (E3). */
+export interface ChecklistItem {
+  id: string
+  text: string
+  done: boolean
+}
+
+export const REPEAT_UNITS = ['day', 'week', 'month', 'year'] as const
+export type RepeatUnit = (typeof REPEAT_UNITS)[number]
+
+/**
+ * PD-4: the Task comes back every `every` units, counted from its Due date or from
+ * the day it was finished. A repeating Task always has a Due date.
+ */
+export interface Repeat {
+  every: number
+  unit: RepeatUnit
+  from: 'due' | 'done'
+}
+
 export interface Task {
   id: string
   title: string
@@ -34,10 +54,38 @@ export interface Task {
   archived: boolean
   /** Hand-picked to appear on Home. Cleared when the task becomes done. */
   pinned: boolean
+  /** PD-1: how long one sitting is expected to take, in minutes, a multiple of 15. Never summed. */
+  estimate?: number
+  /** PD-3. Absent and empty mean the same. */
+  checklist?: ChecklistItem[]
+  /** PD-4. Requires `due`. */
+  repeat?: Repeat
   createdAt: ISODateTime
   updatedAt: ISODateTime
   completedAt?: ISODateTime
 }
+
+/** The Estimate chips (PD-1), in minutes. */
+export const ESTIMATE_CHOICES: readonly number[] = [15, 30, 45, 60, 90, 120, 180, 240]
+
+/** Minutes to "45m", "1h", "1h30". */
+export function describeEstimate(minutes: number): string {
+  const h = Math.floor(minutes / 60)
+  const m = minutes % 60
+  if (h === 0) return `${m}m`
+  return m === 0 ? `${h}h` : `${h}h${String(m).padStart(2, '0')}`
+}
+
+/** "Every day", "Every 2 weeks", "Every month after done". */
+export function describeRepeat(repeat: Repeat): string {
+  const unit = repeat.every === 1 ? repeat.unit : `${repeat.every} ${repeat.unit}s`
+  return `Every ${unit}${repeat.from === 'done' ? ' after done' : ''}`
+}
+
+export const checklistProgress = (items?: readonly ChecklistItem[]): { done: number; total: number } => ({
+  done: items?.filter((i) => i.done).length ?? 0,
+  total: items?.length ?? 0,
+})
 
 export const STATUS_LABEL: Record<TaskStatus, string> = {
   todo: 'To do',
@@ -97,6 +145,9 @@ export function buildTask(input: NewTask, id: string, tasks: readonly Task[], no
     spaceId: input.spaceId ?? DEFAULT_SPACE_ID,
     archived: input.archived ?? false,
     pinned: status === 'done' ? false : (input.pinned ?? false),
+    ...(input.estimate !== undefined && { estimate: input.estimate }),
+    ...(input.checklist !== undefined && input.checklist.length > 0 && { checklist: input.checklist }),
+    ...(input.repeat !== undefined && { repeat: input.repeat }),
     createdAt: now,
     updatedAt: now,
     completedAt: status === 'done' ? now : undefined,
@@ -115,3 +166,81 @@ export function applyPatch(task: Task, patch: TaskPatch, now: ISODateTime): Task
   if (next.status === 'done') next.pinned = false
   return next
 }
+
+// ---- Repeat (PD-4, PD-5) ---------------------------------------------------------
+// Calendar arithmetic on ISODate strings, stepped in UTC like domain/block.ts so a DST
+// change can never move a date. A month step clamps the day (31 Jan → 28/29 Feb).
+
+function addInterval(date: ISODate, repeat: Repeat): ISODate {
+  const [y, m, d] = date.split('-').map(Number)
+  const at = new Date(Date.UTC(y, m - 1, d))
+  switch (repeat.unit) {
+    case 'day':
+      at.setUTCDate(at.getUTCDate() + repeat.every)
+      break
+    case 'week':
+      at.setUTCDate(at.getUTCDate() + 7 * repeat.every)
+      break
+    case 'month':
+    case 'year': {
+      const months = repeat.unit === 'month' ? repeat.every : 12 * repeat.every
+      const target = new Date(Date.UTC(y, m - 1 + months, 1))
+      const last = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate()
+      target.setUTCDate(Math.min(d, last))
+      return target.toISOString().slice(0, 10)
+    }
+  }
+  return at.toISOString().slice(0, 10)
+}
+
+/**
+ * The Due date of the next occurrence (PD-5). Due-anchored: the old Due stepped by the
+ * interval until it is after `doneOn`, so a Task finished months late comes back once,
+ * not once per missed interval. Done-anchored: `doneOn` stepped once.
+ */
+export function nextDue(repeat: Repeat, due: ISODate, doneOn: ISODate): ISODate {
+  if (repeat.from === 'done') return addInterval(doneOn, repeat)
+  let next = addInterval(due, repeat)
+  while (next <= doneOn) next = addInterval(next, repeat)
+  return next
+}
+
+/**
+ * PD-5, E5: finishing a Task that repeats. `done` is the Task completed as `applyPatch`
+ * would (its Repeat removed, so reopening it makes an ordinary Task); `next` is the new
+ * occurrence — same title, description, Priority, Tags, Space, Estimate, Repeat and
+ * Checklist (unticked), pinned as the finished one was, unscheduled, at the top of To do,
+ * due on the next occurrence. The caller stores both.
+ */
+export function completeRepeating(
+  task: Task & { repeat: Repeat },
+  tasks: readonly Task[],
+  nextId: string,
+  now: ISODateTime,
+  today: ISODate,
+): { done: Task; next: Task } {
+  const { repeat: _rule, ...rest } = task
+  const done = applyPatch(rest, { status: 'done' }, now)
+  const next = buildTask(
+    {
+      title: task.title,
+      description: task.description,
+      priority: task.priority,
+      tags: task.tags,
+      spaceId: task.spaceId,
+      pinned: task.pinned,
+      due: nextDue(task.repeat, task.due ?? today, today),
+      estimate: task.estimate,
+      checklist: task.checklist?.map((i) => ({ ...i, done: false })),
+      repeat: task.repeat,
+    },
+    nextId,
+    tasks,
+    now,
+  )
+  return { done, next }
+}
+
+/** Whether `patch` finishes a Task that will come back (PD-5): the store and the tools ask this before `applyPatch`. */
+export const finishesRepeating = (task: Task, patch: TaskPatch): task is Task & { repeat: Repeat } =>
+  task.repeat !== undefined && patch.status === 'done' && task.status !== 'done'

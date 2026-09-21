@@ -281,6 +281,22 @@ export function isStalePlacement(p: Placement, task: Task, placements: readonly 
   return !placedDays(placements, task.id).includes(task.scheduled)
 }
 
+/**
+ * PD-2: the span a Task gets when it is first placed at an hour and only the start is
+ * known — from the tray, a sheet's "Set a time", a drag that fixed one edge, or
+ * `place_task`. Its length is the Task's Estimate when it has one, else one hour;
+ * inside a block it never runs past the block's end, and never past the day.
+ */
+export function defaultSpan(
+  start: Minutes,
+  task?: Pick<Task, 'estimate'>,
+  block?: Pick<Block, 'end'>,
+): { start: Minutes; end: Minutes } {
+  const length = task?.estimate ?? 60
+  const end = Math.min(start + snap(length), block?.end ?? DAY, DAY)
+  return { start, end: end > start ? end : Math.min(start + STEP, DAY) }
+}
+
 // ---- Placement revisions -----------------------------------------------------------
 // What a Block change does to its Placements, as data: the whole list afterwards, plus
 // the ones rewritten and the ones taken out, so a store can bury the latter and a

@@ -1,4 +1,4 @@
-import type { ISODate, Task } from '../../domain/task'
+import { describeEstimate, type ISODate, type Task } from '../../domain/task'
 import { useSpaces } from '../../store/spaces'
 import { PriorityMark, SpaceDot } from '../../components/TaskCard'
 
@@ -34,6 +34,8 @@ export function Tray({ date, tasks, onPlace, className = '' }: Props) {
               <SpaceDot colour={space?.colour ?? '#d4d4d4'} title={space?.name} />
               <PriorityMark priority={t.priority} />
               <span className="truncate">{t.title}</span>
+              {/* PD-1: the length a drop would take (PD-2). */}
+              {t.estimate !== undefined && <span className="shrink-0 tabular-nums text-fg-faint">{describeEstimate(t.estimate)}</span>}
             </button>
           </li>
         )

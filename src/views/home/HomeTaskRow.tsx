@@ -3,7 +3,7 @@ import type { Task } from '../../domain/task'
 import { useSpaces } from '../../store/spaces'
 import type { TodayReason } from '../../domain/home'
 import { TaskRow } from '../../components/TaskRow'
-import { DueChip, SpaceDot } from '../../components/TaskCard'
+import { DueChip, SpaceDot, TaskMarks } from '../../components/TaskCard'
 import { Chip } from '../../components/ui'
 
 /**
@@ -44,6 +44,7 @@ export function HomeTaskRow({
           </span>
           {task.due ? <DueChip due={task.due} done={done} /> : reason === 'scheduled' && <Chip tone="accent">Scheduled</Chip>}
           {hour && <span className="tabular-nums">{hour}</span>}
+          <TaskMarks task={task} />
         </>
       }
     />

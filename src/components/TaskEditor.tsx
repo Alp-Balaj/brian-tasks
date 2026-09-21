@@ -4,16 +4,23 @@ import { useSpaces } from '../store/spaces'
 import { useBlocks } from '../store/blocks'
 import { Sheet } from './Sheet'
 import { SpaceDot } from './TaskCard'
-import { Button, ChipButton, Segmented, SectionLabel, field, type Tone } from './ui'
+import { Button, ChipButton, CircleCheck, Segmented, SectionLabel, field, type Tone } from './ui'
 import { CloseIcon } from './icons'
 import { formatDay, shiftISODate, toISODate } from '../lib/dates'
 import { useToday } from '../lib/useToday'
+import { nanoid } from 'nanoid'
 import {
+  ESTIMATE_CHOICES,
   PRIORITY_LABEL,
+  REPEAT_UNITS,
   STATUS_LABEL,
   TASK_PRIORITIES,
   TASK_STATUSES,
+  describeEstimate,
+  type ChecklistItem,
   type ISODate,
+  type Repeat,
+  type RepeatUnit,
   type Task,
   type TaskPriority,
 } from '../domain/task'
@@ -115,6 +122,15 @@ export function TaskEditor({ taskId, onClose }: Props) {
           <span className="text-sm">Pinned to Home</span>
           <Switch checked={task.pinned} disabled={done} onChange={() => togglePin(task.id)} label="Pinned to Home" />
         </label>
+
+        {/* PD-6: Estimate, Checklist, Repeat live between Space and Tags. */}
+        <EstimateField value={task.estimate} onChange={(estimate) => set({ estimate })} />
+
+        <Field label="Checklist">
+          <ChecklistField value={task.checklist ?? []} onChange={(checklist) => set({ checklist })} />
+        </Field>
+
+        <RepeatField value={task.repeat} due={task.due} onChange={(patch) => set(patch)} />
 
         <Field label="Tags">
           <TagsField value={task.tags} onChange={(tags) => set({ tags })} />
@@ -297,4 +313,173 @@ function AutoTextarea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
     el.style.height = `${el.scrollHeight}px`
   }, [props.value])
   return <textarea ref={ref} {...props} />
+}
+
+/** PD-1: chips for the usual lengths, or a typed number of minutes. "None" clears. */
+function EstimateField({ value, onChange }: { value?: number; onChange: (v?: number) => void }) {
+  const [typing, setTyping] = useState(false)
+  const [draft, setDraft] = useState('')
+  const commit = () => {
+    const minutes = Math.round(Number(draft) / 15) * 15
+    if (Number.isFinite(minutes) && minutes > 0) onChange(minutes)
+    setTyping(false)
+    setDraft('')
+  }
+  return (
+    <Field label={value !== undefined ? `Estimate · ${describeEstimate(value)}` : 'Estimate'}>
+      <div role="radiogroup" aria-label="Estimate" className="flex flex-wrap gap-1.5">
+        {ESTIMATE_CHOICES.map((m) => (
+          <ChipButton
+            key={m}
+            role="radio"
+            aria-checked={value === m}
+            active={value === m}
+            onClick={() => onChange(value === m ? undefined : m)}
+            className="min-h-9 px-2.5 tabular-nums"
+          >
+            {describeEstimate(m)}
+          </ChipButton>
+        ))}
+        {typing ? (
+          <input
+            autoFocus
+            type="number"
+            inputMode="numeric"
+            min={15}
+            step={15}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') commit()
+              if (e.key === 'Escape') setTyping(false)
+            }}
+            placeholder="min"
+            aria-label="Estimate in minutes"
+            className={`${field} min-h-9 w-20 py-0 text-sm`}
+          />
+        ) : (
+          <ChipButton onClick={() => setTyping(true)} className="min-h-9 px-2.5">
+            Other…
+          </ChipButton>
+        )}
+      </div>
+    </Field>
+  )
+}
+
+/** PD-3: a flat list of items; Enter or the + adds, the check ticks, × removes. */
+function ChecklistField({ value, onChange }: { value: ChecklistItem[]; onChange: (items: ChecklistItem[]) => void }) {
+  const [draft, setDraft] = useState('')
+  const add = () => {
+    const text = draft.trim()
+    if (!text) return
+    onChange([...value, { id: nanoid(6), text, done: false }])
+    setDraft('')
+  }
+  const patch = (id: string, fn: (i: ChecklistItem) => ChecklistItem) => onChange(value.map((i) => (i.id === id ? fn(i) : i)))
+  return (
+    <div className="flex flex-col gap-1">
+      {value.map((item) => (
+        <div key={item.id} className="flex min-h-10 items-center gap-1 rounded-xl bg-surface-2 pr-1 pl-1">
+          <CircleCheck
+            checked={item.done}
+            onChange={(done) => patch(item.id, (i) => ({ ...i, done }))}
+            label={item.done ? `Untick ${item.text}` : `Tick ${item.text}`}
+          />
+          <input
+            value={item.text}
+            onChange={(e) => patch(item.id, (i) => ({ ...i, text: e.target.value }))}
+            onBlur={() => {
+              if (!item.text.trim()) onChange(value.filter((i) => i.id !== item.id))
+            }}
+            aria-label="Checklist item"
+            className={`min-w-0 flex-1 bg-transparent text-base outline-none md:text-sm ${item.done ? 'text-fg-faint line-through' : ''}`}
+          />
+          <button
+            type="button"
+            onClick={() => onChange(value.filter((i) => i.id !== item.id))}
+            aria-label={`Remove ${item.text}`}
+            className="grid h-8 w-8 shrink-0 place-items-center rounded text-fg-faint hover:text-fg"
+          >
+            <CloseIcon size={12} />
+          </button>
+        </div>
+      ))}
+      <input
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault()
+            add()
+          }
+        }}
+        onBlur={add}
+        placeholder={value.length === 0 ? 'Add a step' : 'Add another'}
+        aria-label="Add a checklist item"
+        className={`${field} min-h-10 py-2 text-base md:text-sm`}
+      />
+    </div>
+  )
+}
+
+const UNIT_LABEL: Record<RepeatUnit, string> = { day: 'days', week: 'weeks', month: 'months', year: 'years' }
+const UNIT_OPTIONS = REPEAT_UNITS.map((u) => ({ value: u, label: UNIT_LABEL[u] }))
+const FROM_OPTIONS = [
+  { value: 'due', label: 'From due date' },
+  { value: 'done', label: 'After done' },
+] as const
+
+/**
+ * PD-4: off, or every N units from the Due date or from completion. Turning it on
+ * gives a Task without a Due date today's, since a repeating Task always has one.
+ */
+function RepeatField({
+  value,
+  due,
+  onChange,
+}: {
+  value?: Repeat
+  due?: ISODate
+  onChange: (patch: { repeat?: Repeat; due?: ISODate }) => void
+}) {
+  const setRule = (patch: Partial<Repeat>) => {
+    const next: Repeat = { every: 1, unit: 'week', from: 'due', ...value, ...patch }
+    onChange({ repeat: next, ...(due === undefined && { due: toISODate(new Date()) }) })
+  }
+  return (
+    <Field label="Repeat">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <ChipButton active={value === undefined} onClick={() => onChange({ repeat: undefined })} className="min-h-9 px-2.5">
+          Off
+        </ChipButton>
+        {value === undefined ? (
+          <ChipButton onClick={() => setRule({})} className="min-h-9 px-2.5">
+            Repeat…
+          </ChipButton>
+        ) : (
+          <>
+            <span className="text-sm text-fg-muted">every</span>
+            <input
+              type="number"
+              inputMode="numeric"
+              min={1}
+              value={value.every}
+              onChange={(e) => {
+                const every = Math.max(1, Math.floor(Number(e.target.value) || 1))
+                setRule({ every })
+              }}
+              aria-label="Repeat every"
+              className={`${field} min-h-9 w-16 py-0 text-sm tabular-nums`}
+            />
+            <Segmented value={value.unit} options={UNIT_OPTIONS} onChange={(unit) => setRule({ unit })} label="Repeat unit" />
+          </>
+        )}
+      </div>
+      {value !== undefined && (
+        <Segmented value={value.from} options={FROM_OPTIONS} onChange={(from) => setRule({ from })} label="Repeat from" />
+      )}
+    </Field>
+  )
 }

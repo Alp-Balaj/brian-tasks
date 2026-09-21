@@ -279,6 +279,56 @@ describe('update_task', () => {
   })
 })
 
+describe('task fields (PD-1, PD-3, PD-4)', () => {
+  it('create_task takes an estimate (rounded to 15), a checklist and a repeat, giving a repeat a due date', async () => {
+    const { data } = await call('create_task', {
+      title: 'Rent',
+      estimate: 50,
+      checklist: ['Check balance', { text: 'Transfer', done: true }],
+      repeat: { unit: 'month' },
+    })
+    expect(data).toMatchObject({ estimate: 45, due: TODAY, repeat: { every: 1, unit: 'month', from: 'due' } })
+    expect(data.checklist.map((i: { text: string; done: boolean }) => [i.text, i.done])).toEqual([
+      ['Check balance', false],
+      ['Transfer', true],
+    ])
+    const short = (await call('list_tasks', { search: 'rent' })).data.tasks[0]
+    expect(short).toMatchObject({ estimate: 45, checklist: { done: 1, total: 2 }, repeat: 'Every month' })
+  })
+
+  it('update_task replaces the checklist keeping ids of unchanged items, and clears with null', async () => {
+    const made = (await call('create_task', { title: 'Steps', checklist: ['a', 'b'], estimate: 30 })).data
+    const [a] = made.checklist
+    const { data } = await call('update_task', { id: made.id, checklist: [{ text: 'a', done: true }, 'c'], estimate: null })
+    expect(data.checklist[0]).toEqual({ id: a.id, text: 'a', done: true })
+    expect(data.checklist[1].id).not.toBe(made.checklist[1].id)
+    expect(data.estimate).toBeUndefined()
+    const cleared = (await call('update_task', { id: made.id, checklist: [] })).data
+    expect(cleared.checklist).toBeUndefined()
+  })
+
+  it('finishing a repeating Task keeps it done and returns the next occurrence (PD-5)', async () => {
+    const rent = (await call('create_task', { title: 'Rent', due: '2026-10-01', repeat: { unit: 'month' }, pinned: true, space: 'Work' })).data
+    const { data } = await call('update_task', { id: rent.id, status: 'done' })
+    expect(data).toMatchObject({ id: rent.id, status: 'done' })
+    expect(data.repeat).toBeUndefined()
+    expect(data.next).toMatchObject({ title: 'Rent', status: 'todo', due: '2026-11-01', pinned: true, space: 'Work', repeat: { unit: 'month' } })
+    const stored = records.rows.get(`task:${data.next.id}`)!.data as Task
+    expect(stored.due).toBe('2026-11-01')
+    expect((records.rows.get(`task:${rent.id}`)!.data as Task).status).toBe('done')
+  })
+
+  it('list_tasks completed_since implies done and filters by completion day', async () => {
+    await call('update_task', { id: 'a', status: 'done' })
+    const { data } = await call('list_tasks', { completed_since: TODAY })
+    expect(data.tasks.map((t: { id: string }) => t.id)).toEqual(['a'])
+    expect((await call('list_tasks', { completed_since: '2026-09-21' })).data.count).toBe(0)
+    // 'c' was finished on 10 Sep in the seed.
+    expect((await call('list_tasks', { completed_until: '2026-09-10' })).data.tasks.map((t: { id: string }) => t.id)).toEqual(['c'])
+    expect((await call('list_tasks', { completed_until: TODAY })).data.count).toBe(2)
+  })
+})
+
 describe('delete_task', () => {
   it('buries the Task and its Placements, and leaves everything else', async () => {
     const t0 = '2026-09-14T00:00:00.000Z'
@@ -329,6 +379,14 @@ describe('routines', () => {
     expect((await call('list_routines')).data.map((r: { id: string }) => r.id)).toEqual(['r2'])
     expect((await call('delete_routine', { routine: 'r2' })).data).toEqual({ id: 'r2', title: 'Gym', deleted: true })
     expect((await call('delete_routine', { routine: 'Gym' })).isError).toBe(true)
+  })
+
+  it('list_routines with days adds a history per day (PD-14)', async () => {
+    const { data } = await call('list_routines', { days: 3 })
+    // Sunday: the daily one was done yesterday; the Mon/Wed/Fri one is off at the weekend and was missed Friday.
+    expect(data[0].history).toEqual({ '2026-09-18': 'missed', '2026-09-19': 'done', [TODAY]: 'open' })
+    expect(data[1].history).toEqual({ '2026-09-18': 'missed', '2026-09-19': 'off', [TODAY]: 'off' })
+    expect((await call('list_routines')).data[0].history).toBeUndefined()
   })
 
   it('list_routines shows schedule and today state', async () => {
@@ -614,5 +672,117 @@ describe('blocks', () => {
     expect(ended.isError).toBe(true)
     expect(ended.text).toContain('everywhere')
     expect((await call('delete_block', { id: 'gym', from: W1, everywhere: true })).data.deleted).toBe(true)
+  })
+})
+
+describe('placements (PD-7)', () => {
+  const W0 = '2026-09-14'
+  const t0 = '2026-09-01T00:00:00.000Z'
+  const job: Block = { id: 'job', name: 'Job', colour: '#4f6fd8', weekday: 1, start: 9 * 60, end: 17 * 60, from: W0, routineIds: [], createdAt: t0, updatedAt: t0 }
+  const stored = <T>(kind: string, id: string) => records.rows.get(`${kind}:${id}`)!.data as T
+
+  beforeEach(async () => {
+    await records.put([liveRow('block', 'job', job)])
+  })
+
+  it('place_task in a Block by name sets Scheduled to that day', async () => {
+    const { data } = await call('place_task', { id: 'a', date: W0, block: 'job' })
+    expect(data).toMatchObject({ date: W0, block: 'Job', blockId: 'job', scheduled: W0, task: { id: 'a' } })
+    expect(data.start).toBeUndefined()
+    expect(stored<Task>('task', 'a').scheduled).toBe(W0)
+    expect(stored<Placement>('placement', data.id)).toMatchObject({ taskId: 'a', date: W0, blockId: 'job' })
+  })
+
+  it('place_task at an hour is as long as the Estimate, else an hour, never past the Block (PD-2)', async () => {
+    await call('update_task', { id: 'a', estimate: 90 })
+    const sized = (await call('place_task', { id: 'a', date: W0, start: '10:00' })).data
+    expect([sized.start, sized.end]).toEqual(['10:00', '11:30'])
+    const plain = (await call('place_task', { id: 'b', date: W0, start: '10:07' })).data
+    expect([plain.start, plain.end]).toEqual(['10:00', '11:00'])
+    const clipped = (await call('place_task', { id: 'a', date: W0, block: 'Job', start: '16:30' })).data
+    expect([clipped.start, clipped.end, clipped.block]).toEqual(['16:30', '17:00', 'Job'])
+    const drawn = (await call('place_task', { id: 'a', date: W0, start: '13:00', end: '13:15' })).data
+    expect([drawn.start, drawn.end]).toEqual(['13:00', '13:15'])
+  })
+
+  it('place_task refuses neither block nor hour, an unknown Block on that day, and an unknown Task', async () => {
+    expect((await call('place_task', { id: 'a', date: W0 })).isError).toBe(true)
+    const wrongDay = await call('place_task', { id: 'a', date: '2026-09-15', block: 'Job' })
+    expect(wrongDay.isError).toBe(true)
+    expect(wrongDay.text).toContain('(none)')
+    expect((await call('place_task', { id: 'zzz', date: W0, block: 'Job' })).isError).toBe(true)
+  })
+
+  it('Scheduled follows the earliest Placement and is never cleared (D9, TB-17)', async () => {
+    const later = (await call('place_task', { id: 'a', date: '2026-09-16', start: '09:00' })).data
+    expect(stored<Task>('task', 'a').scheduled).toBe('2026-09-16')
+    const earlier = (await call('place_task', { id: 'a', date: W0, block: 'Job' })).data
+    expect(stored<Task>('task', 'a').scheduled).toBe(W0)
+    const gone = (await call('unplace', { id: earlier.id })).data
+    expect(gone).toEqual({ id: earlier.id, removed: true, task: 'Overdue report', scheduled: '2026-09-16' })
+    expect(stored<Task>('task', 'a').scheduled).toBe('2026-09-16')
+    await call('unplace', { id: later.id })
+    expect(stored<Task>('task', 'a').scheduled).toBe('2026-09-16')
+    expect(records.rows.get(`placement:${later.id}`)!.deleted).toBe(true)
+    expect((await call('unplace', { id: later.id })).isError).toBe(true)
+  })
+
+  it('list_placements covers this week by default, in day and hour order', async () => {
+    await call('place_task', { id: 'a', date: '2026-09-16', start: '14:00' })
+    await call('place_task', { id: 'b', date: '2026-09-16', start: '09:00' })
+    await call('place_task', { id: 'b', date: W0, block: 'Job' })
+    await call('place_task', { id: 'b', date: '2026-09-21', start: '09:00' })
+    const { data } = await call('list_placements')
+    expect([data.from, data.to, data.count]).toEqual([W0, '2026-09-20', 3])
+    expect(data.placements.map((p: { date: string; start?: string }) => [p.date, p.start])).toEqual([
+      [W0, undefined],
+      ['2026-09-16', '09:00'],
+      ['2026-09-16', '14:00'],
+    ])
+    expect((await call('list_placements', { from: '2026-09-21', to: '2026-09-21' })).data.count).toBe(1)
+  })
+
+  it('update_placement moves the day, keeps the length on a new start, drops a Block the new day lacks, and refuses emptiness', async () => {
+    const p = (await call('place_task', { id: 'a', date: W0, block: 'Job', start: '10:00', end: '11:30' })).data
+    const moved = (await call('update_placement', { id: p.id, start: '14:00' })).data
+    expect([moved.start, moved.end, moved.block]).toEqual(['14:00', '15:30', 'Job'])
+    const tuesday = (await call('update_placement', { id: p.id, date: '2026-09-15' })).data
+    expect(tuesday.block).toBeUndefined()
+    expect([tuesday.date, tuesday.start]).toEqual(['2026-09-15', '14:00'])
+    expect((await call('update_placement', { id: p.id, start: null })).isError).toBe(true)
+    const back = (await call('update_placement', { id: p.id, date: W0, block: 'job', start: null })).data
+    expect(back).toMatchObject({ date: W0, block: 'Job' })
+    expect(back.start).toBeUndefined()
+    expect(stored<Task>('task', 'a').scheduled).toBe(W0)
+  })
+})
+
+describe('week_review (PD-12, PD-13)', () => {
+  it('reports done by Space, Routine ratios and stale Placements for the week', async () => {
+    await call('update_task', { id: 'a', status: 'done' })
+    const p = (await call('place_task', { id: 'b', date: '2026-09-16', start: '09:00' })).data
+    await call('place_task', { id: 'b', date: TODAY, start: '09:00' }) // today: not stale yet
+    const { data } = await call('week_review')
+    expect(data.week).toBe('2026-09-14')
+    expect(data.summary).toBe('1 done · Routines 1/10 · 1 stale')
+    expect(data.done).toEqual([{ space: 'Work', tasks: [expect.objectContaining({ id: 'a' })] }])
+    expect(data.routines).toEqual([
+      { id: 'r1', title: 'Read 20 pages', checked: 1, scheduled: 7 },
+      { id: 'r2', title: 'Gym', checked: 0, scheduled: 3 },
+    ])
+    expect(data.stale).toEqual([{ placementId: p.id, date: '2026-09-16', start: '09:00', end: '10:00', task: expect.objectContaining({ id: 'b' }) }])
+    // 'c' was finished on 10 Sep in the seed.
+    expect((await call('week_review', { week: '2026-09-07' })).data.summary).toBe('1 done · Routines 0/10')
+  })
+})
+
+describe('prompts (PD-11)', () => {
+  it('offers plan_day and close_day', async () => {
+    const { prompts } = await client.listPrompts()
+    expect(prompts.map((p) => p.name).sort()).toEqual(['close_day', 'plan_day'])
+    const { messages } = await client.getPrompt({ name: 'plan_day', arguments: { date: '2026-09-21' } })
+    expect((messages[0].content as { text: string }).text).toContain('date 2026-09-21')
+    const close = await client.getPrompt({ name: 'close_day', arguments: {} })
+    expect((close.messages[0].content as { text: string }).text).toContain('update_task')
   })
 })

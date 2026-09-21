@@ -69,3 +69,34 @@ export function homeSections(tasks: Task[], today: ISODate): HomeSections {
 
   return { overdue, today: todayRows, pinned, inProgress }
 }
+
+// ---- Close the day (PD-9) ----------------------------------------------------------
+
+/** The field that put a Task on Today, and so the one Tomorrow / Later move (PD-9, PD-10). */
+export type OpenReason = 'due' | 'scheduled' | 'placed'
+
+export interface OpenRow {
+  task: Task
+  reason: OpenReason
+}
+
+/**
+ * What is still open on `today` in the evening: Overdue and due-today Tasks (moved by
+ * their Due date), Tasks Scheduled today, and Tasks placed today that are neither
+ * (moved by their Scheduled date; the Placement stays, TB-17). Each Task once, in the
+ * first reason it qualifies for; done and archived Tasks are never open.
+ */
+export function openRows(tasks: readonly Task[], placedToday: ReadonlySet<string>, today: ISODate): OpenRow[] {
+  const rows: OpenRow[] = []
+  for (const task of tasks) {
+    if (task.archived || task.status === 'done') continue
+    if (task.due !== undefined && task.due <= today) rows.push({ task, reason: 'due' })
+    else if (task.scheduled === today) rows.push({ task, reason: 'scheduled' })
+    else if (placedToday.has(task.id)) rows.push({ task, reason: 'placed' })
+  }
+  const rank: Record<OpenReason, number> = { due: 0, scheduled: 1, placed: 2 }
+  return rows.sort((a, b) => rank[a.reason] - rank[b.reason] || byPriority(a.task, b.task))
+}
+
+/** Close the day is offered from this hour, Device-local (PD-9). */
+export const CLOSE_DAY_FROM_HOUR = 18

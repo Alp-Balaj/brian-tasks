@@ -95,6 +95,9 @@ appointments, not a time tracker, not a second task list.
   computed open-time totals; no write-back to Tasks beyond Scheduled; no MCP/CLI tools
   for Placements (`today` reports them). Block tools (`list_blocks`, `create_block`,
   `update_block`, `delete_block`) were added after v1, on the same TB-5 rules as the sheet.
+  Placement tools (`list_placements`, `place_task`, `update_placement`, `unplace`) followed
+  with `docs/planning-the-day.md` (PD-7), on the sheet's D3/D9 rules; a Task's Estimate
+  now sizes a Placement made from a start alone (PD-2).
 
 ---
 

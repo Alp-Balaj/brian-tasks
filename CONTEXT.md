@@ -41,6 +41,18 @@ _Avoid_: Hidden, deleted, the `archived` tag
 A Task you have hand-picked to appear on Home.
 _Avoid_: Starred, favourite, flagged
 
+**Estimate**:
+How long one sitting of a Task is expected to take, in minutes. Sizes a Placement when the Task is put at an hour. Never added up.
+_Avoid_: Duration, time budget, effort
+
+**Checklist**:
+The flat list of steps inside a Task, each ticked or not. Steps are not Tasks; ticking them all does not finish the Task.
+_Avoid_: Subtasks, sub-items, nested tasks
+
+**Repeat**:
+A rule on a Task that brings it back: every N days, weeks, months or years, counted from its Due date or from the day it was finished. Finishing a repeating Task finishes that Task; the next occurrence is a new Task.
+_Avoid_: Recurring task, recurrence, RRULE (and never for Routines)
+
 ### Spaces
 
 **Space**:
@@ -98,6 +110,14 @@ _Avoid_: Event, time slot, booking
 **Placed / Unplaced**:
 A Task is placed on a day when it has a Placement there; unplaced = Scheduled for a day with no Placement on it.
 
+**Stale**:
+A Placement on a day that has passed whose Task is still not done. Shown in the Look-back, one tap to remove.
+_Avoid_: Overdue, missed (both reserved)
+
+**Look-back**:
+The one line under a week's heading on the Week page — Tasks finished that week, Routines checked over scheduled, stale Placements — and the sheet behind it. Drawn, not scored.
+_Avoid_: Review, report, stats, score
+
 **Week**:
 The page: seven day rows, 00–24, Blocks and Placements drawn to scale, plus each day's unplaced tray.
 _Avoid_: Schedule, timetable, planner
@@ -107,6 +127,18 @@ _Avoid_: Schedule, timetable, planner
 **Home**:
 The landing page. Today's strip of Blocks and Placements at the very top, then only the few Tasks that matter right now and Today's Routines, across all Spaces: what is due or Scheduled Today, then Overdue, then Routines, then Pinned, then in progress. A Task appears once, in the first of those it qualifies for.
 _Avoid_: Dashboard, overview, today view
+
+**Close the day**:
+Home's last section from 18:00: every Task still open on Today, each settled as done, tomorrow, or Later. A state of the evening, not a record; an unclosed day is simply tomorrow's Overdue.
+_Avoid_: Shutdown, daily review, roll-over
+
+**Later**:
+The one-tap way to move a Task off Today — tomorrow, next week, a chosen day, or unscheduled. It moves the date that put the Task on Today (Due if it was due, else Scheduled) and leaves Placements alone.
+_Avoid_: Snooze, defer, postpone, someday
+
+**Jump**:
+The keyboard way to reach anything on a desktop (⌘K / Ctrl K): type part of a Task's title or a page's name, Enter opens it.
+_Avoid_: Search, command palette, spotlight
 
 ### Archive
 
@@ -119,6 +151,10 @@ _Avoid_: Trash, bin, history
 **Device**:
 One browser or installed app you use Brian from (the laptop, the phone). Your data is the same on every Device. A Device may be offline; it keeps working and catches up when it is back.
 _Avoid_: Client, session, install
+
+**Notification**:
+What a Device that has opted in is told: a Task placed at an hour, when that hour comes, and one line at 08:00 about the day. Each Device decides for itself; nothing else is ever sent.
+_Avoid_: Reminder, alert, push (fine in code)
 
 **Catching up**:
 What a Device does when it reconnects: it learns what changed elsewhere and tells the others what changed here. If the very same Task, Space or Routine was changed on two Devices while apart, the later change wins and the earlier one is gone. Check-ins are never lost this way.

@@ -1,4 +1,4 @@
-import { STATUS_LABEL, type Task } from '../domain/task'
+import { checklistProgress, describeEstimate, describeRepeat, STATUS_LABEL, type Task } from '../domain/task'
 import { ALL_SPACES } from '../domain/space'
 import { useSpaces } from '../store/spaces'
 import { useSpaceSelection } from '../store/ui'
@@ -38,6 +38,33 @@ export function PriorityMark({ priority }: { priority: Task['priority'] }) {
 }
 
 /**
+ * The quiet marks for Estimate, Checklist and Repeat (PD-1, PD-3, PD-4), in that order,
+ * for any row or card's meta line. Renders nothing for a Task without them.
+ */
+export function TaskMarks({ task }: { task: Task }) {
+  const progress = checklistProgress(task.checklist)
+  return (
+    <>
+      {task.estimate !== undefined && (
+        <span className="tabular-nums" title="Estimate">
+          {describeEstimate(task.estimate)}
+        </span>
+      )}
+      {progress.total > 0 && (
+        <span className="tabular-nums" title="Checklist">
+          {progress.done}/{progress.total}
+        </span>
+      )}
+      {task.repeat && (
+        <span title={describeRepeat(task.repeat)} aria-label={describeRepeat(task.repeat)}>
+          ↻
+        </span>
+      )}
+    </>
+  )
+}
+
+/**
  * Compact task representation shared by board and calendar. Presentation only.
  * `onStatus` adds a status button (the tap alternative to dragging between columns).
  */
@@ -69,7 +96,7 @@ export function TaskCard({
     )
   }
 
-  const hasMeta = task.due || task.tags.length > 0 || space
+  const hasMeta = task.due || task.tags.length > 0 || space || task.estimate || task.checklist?.length || task.repeat
   return (
     <div
       onClick={onClick}
@@ -90,6 +117,7 @@ export function TaskCard({
                 </span>
               )}
               {task.due && <DueChip due={task.due} done={done} />}
+              <TaskMarks task={task} />
               {task.tags.map((t) => (
                 <Chip key={t}>{t}</Chip>
               ))}

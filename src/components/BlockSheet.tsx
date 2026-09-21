@@ -21,6 +21,7 @@ import {
   blockNames,
   carries,
   dateInWeek,
+  defaultSpan,
   describeSpan,
   isStalePlacement,
   isTimed,
@@ -447,7 +448,7 @@ function TasksSection({ block, day, today, onAdd }: { block: Block; day: ISODate
                   setTiming(null)
                 }}
                 onRemove={() => removePlacement(p.id)}
-                defaultSpan={{ start: block.start, end: Math.min(block.start + 60, block.end) }}
+                defaultSpan={defaultSpan(block.start, task, block)}
                 timed={timed}
               />
             )

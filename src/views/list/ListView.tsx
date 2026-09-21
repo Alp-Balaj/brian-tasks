@@ -7,7 +7,7 @@ import { useSpaceSelection } from '../../store/ui'
 import { useVisibleTasks } from '../../store/selectors'
 import { ALL_SPACES } from '../../domain/space'
 import { useShell } from '../../components/useShell'
-import { DueChip, SpaceDot } from '../../components/TaskCard'
+import { DueChip, SpaceDot, TaskMarks } from '../../components/TaskCard'
 import { RowGroup, TaskRow } from '../../components/TaskRow'
 import { Chip, field } from '../../components/ui'
 import { useToday } from '../../lib/useToday'
@@ -107,6 +107,7 @@ export function ListView() {
                   )}
                   {t.status !== 'todo' && t.status !== 'done' && <span>{STATUS_LABEL[t.status]}</span>}
                   {t.due && <DueChip due={t.due} done={done} today={today} />}
+                  <TaskMarks task={t} />
                   {t.tags.map((tag) => (
                     <Chip key={tag}>{tag}</Chip>
                   ))}

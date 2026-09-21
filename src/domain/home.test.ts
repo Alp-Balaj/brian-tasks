@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { buildTask, type NewTask } from './task'
-import { homeSections } from './home'
+import { homeSections, openRows } from './home'
 
 const NOW = '2026-09-20T10:00:00.000Z'
 const TODAY = '2026-09-20'
@@ -52,5 +52,29 @@ describe('homeSections', () => {
   it('puts due-today before scheduled-today', () => {
     const tasks = [make('sched', { scheduled: TODAY }), make('due', { due: TODAY })]
     expect(homeSections(tasks, TODAY).today.map((r) => r.reason)).toEqual(['due today', 'scheduled'])
+  })
+})
+
+describe('openRows (PD-9)', () => {
+  const t = (id: string, input: Omit<NewTask, 'title'>) => make(id, input)
+  it('lists what is still open on today once each, by the date that put it there', () => {
+    const tasks = [
+      t('overdue', { due: '2026-09-18', priority: 'low' }),
+      t('dueToday', { due: '2026-09-20', scheduled: '2026-09-20' }),
+      t('scheduled', { scheduled: '2026-09-20' }),
+      t('placedOnly', {}),
+      t('placedAndScheduled', { scheduled: '2026-09-20' }),
+      t('done', { status: 'done', due: '2026-09-20' }),
+      t('archived', { archived: true, due: '2026-09-19' }),
+      t('tomorrow', { due: '2026-09-21' }),
+    ]
+    const rows = openRows(tasks, new Set(['placedOnly', 'placedAndScheduled']), '2026-09-20')
+    expect(rows.map((r) => [r.task.id, r.reason])).toEqual([
+      ['dueToday', 'due'],
+      ['overdue', 'due'],
+      ['placedAndScheduled', 'scheduled'],
+      ['scheduled', 'scheduled'],
+      ['placedOnly', 'placed'],
+    ])
   })
 })
