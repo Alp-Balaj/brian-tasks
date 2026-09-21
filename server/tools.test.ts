@@ -381,6 +381,32 @@ describe('routines', () => {
     expect((await call('delete_routine', { routine: 'Gym' })).isError).toBe(true)
   })
 
+  it('create_routine defaults to daily, takes weekdays, and is idempotent on a live title', async () => {
+    const { data } = await call('create_routine', { title: '  Stretch ' })
+    expect(data).toMatchObject({ title: 'Stretch', schedule: 'Every day', done: false, streak: 0 })
+    const stored = records.rows.get(`routine:${data.id}`)!.data as RoutineRecord
+    expect(stored).toMatchObject({ title: 'Stretch', schedule: { kind: 'daily' }, note: '', archived: false })
+    const mwf = (await call('create_routine', { title: 'Run', schedule: ['fri', 'mon', 'wed'], note: '5k' })).data
+    expect(mwf).toMatchObject({ schedule: 'Mon, Wed, Fri', note: '5k' })
+    expect((records.rows.get(`routine:${mwf.id}`)!.data as RoutineRecord).schedule).toEqual({ kind: 'weekdays', days: [1, 3, 5] })
+    const again = (await call('create_routine', { title: 'stretch' })).data
+    expect(again).toMatchObject({ id: data.id, alreadyExists: true })
+    expect((await call('create_routine', { title: 'Run', schedule: [] })).isError).toBe(true)
+  })
+
+  it('update_routine renames, reschedules, archives and restores, keeping Check-ins', async () => {
+    const { data } = await call('update_routine', { routine: 'read 20 pages', title: 'Read 30 pages', schedule: ['sat', 'sun'], note: 'Peak' })
+    expect(data).toMatchObject({ id: 'r1', title: 'Read 30 pages', schedule: 'Sat, Sun', note: 'Peak', scheduledToday: true, streak: 1 })
+    expect(records.rows.get('checkin:r1:2026-09-19')!.deleted).toBe(false)
+    const gone = (await call('update_routine', { routine: 'r1', archived: true })).data
+    expect(gone.archived).toBe(true)
+    expect((await call('list_routines')).data.map((r: { id: string }) => r.id)).toEqual(['r2'])
+    // An archived title can be created afresh; the old one is still reachable by id.
+    expect((await call('create_routine', { title: 'Read 30 pages' })).data.alreadyExists).toBeUndefined()
+    expect((await call('update_routine', { routine: 'r1', archived: false })).data.archived).toBeUndefined()
+    expect((await call('update_routine', { routine: 'nope', note: 'x' })).isError).toBe(true)
+  })
+
   it('list_routines with days adds a history per day (PD-14)', async () => {
     const { data } = await call('list_routines', { days: 3 })
     // Sunday: the daily one was done yesterday; the Mon/Wed/Fri one is off at the weekend and was missed Friday.

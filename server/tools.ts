@@ -40,6 +40,7 @@ import {
   type CheckIn,
   type Routine,
   type RoutineRecord,
+  type Schedule,
 } from '../src/domain/routine.ts'
 import { homeSections } from '../src/domain/home.ts'
 import { describeReview, weekReview } from '../src/domain/review.ts'
@@ -85,7 +86,7 @@ import type { Records } from './records.ts'
 import type { Row } from './db.ts'
 
 export const INSTRUCTIONS = `Brian Tasks is a single-person task manager.
-Vocabulary: a Task has a Status (todo, in-progress, hold, done), a Priority (low, normal, high, urgent), optional Tags, an optional Due date (hard deadline) and Scheduled date (the day to work on it), and lives in exactly one Space (Personal, Work, ...). A Pinned Task shows on Home. Archived Tasks are hidden everywhere but the Archive. A Routine is something done repeatedly on a schedule; it is never finished, only checked in for a day. A Block is a named, coloured span of one day on the Week page (Job 09:00–17:00); a standing Block carries to every following week, a one-off Block is for its week only. Blocks can be listed, created, changed and deleted here; a change to a standing Block applies from a week on and past weeks keep what they had. A Placement is a Task put on a specific day, inside a Block and/or at an hour (\`list_placements\`, \`place_task\`, \`update_placement\`, \`unplace\`); placing a Task makes it Scheduled for its earliest placed day. An appointment (dentist Thu 14:00) is a one-off Block named for it, made with \`create_block\`; there is no calendar import. A Task may carry an Estimate (minutes, one sitting; it sizes a timed Placement when only the start is given), a Checklist (flat steps), and a Repeat (every N days/weeks/months/years from its Due date or from completion): finishing a repeating Task keeps it done and creates the next occurrence.
+Vocabulary: a Task has a Status (todo, in-progress, hold, done), a Priority (low, normal, high, urgent), optional Tags, an optional Due date (hard deadline) and Scheduled date (the day to work on it), and lives in exactly one Space (Personal, Work, ...). A Pinned Task shows on Home. Archived Tasks are hidden everywhere but the Archive. A Routine is something done repeatedly on a schedule (every day, or chosen weekdays); it is never finished, only checked in for a day; it can be created, changed and archived here. A Block is a named, coloured span of one day on the Week page (Job 09:00–17:00); a standing Block carries to every following week, a one-off Block is for its week only. Blocks can be listed, created, changed and deleted here; a change to a standing Block applies from a week on and past weeks keep what they had. A Placement is a Task put on a specific day, inside a Block and/or at an hour (\`list_placements\`, \`place_task\`, \`update_placement\`, \`unplace\`); placing a Task makes it Scheduled for its earliest placed day. An appointment (dentist Thu 14:00) is a one-off Block named for it, made with \`create_block\`; there is no calendar import. A Task may carry an Estimate (minutes, one sitting; it sizes a timed Placement when only the start is given), a Checklist (flat steps), and a Repeat (every N days/weeks/months/years from its Due date or from completion): finishing a repeating Task keeps it done and creates the next occurrence.
 Dates are calendar dates, YYYY-MM-DD, in the user's local time; times are HH:MM. Start with \`today\` to see what matters right now. The prompts \`plan_day\` and \`close_day\` describe the morning and evening rituals; \`week_review\` reports what a week came to. Deleting a Task, Routine, Space or Block is permanent and the app only offers it from the Archive: prefer archiving (update_task archived: true) unless the user asks to delete, and say what will go before deleting. Personal, the default Space, can never be deleted; deleting another Space moves its Tasks to Personal.`
 
 const STATUS_RANK: Record<TaskStatus, number> = { todo: 0, 'in-progress': 1, hold: 2, done: 3 }
@@ -109,6 +110,9 @@ const clockTime = z
 const weekdayNames = WEEKDAYS_MONDAY_FIRST.map((d) => WEEKDAY_SHORT[d].toLowerCase()) as [string, ...string[]]
 const weekday = z.enum(weekdayNames).describe('Day of the week: mon … sun')
 const routineRefs = z.array(z.string()).describe('Routine titles (case-insensitive) or ids')
+const schedule = z
+  .union([z.literal('daily'), z.array(weekday).min(1)])
+  .describe("'daily', or the weekdays it is expected: ['mon', 'wed', 'fri']")
 const estimate = z.number().int().positive().describe('Minutes for one sitting; rounded to 15')
 const checklist = z
   .array(z.union([z.string().min(1), z.object({ text: z.string().min(1), done: z.boolean().optional() })]))
@@ -589,6 +593,74 @@ export function registerTools(server: McpServer, records: Records, clock: Clock 
         return { history: out }
       }
       return ok(routines.map((r) => ({ ...routineView(r, date), ...history(r) })))
+    },
+  )
+
+  const scheduleFrom = (given: 'daily' | string[]): Schedule =>
+    given === 'daily' ? { kind: 'daily' } : { kind: 'weekdays', days: WEEKDAYS_MONDAY_FIRST.filter((d) => given.includes(WEEKDAY_SHORT[d].toLowerCase())) }
+
+  server.registerTool(
+    'create_routine',
+    {
+      title: 'Create Routine',
+      description:
+        'Create a Routine: something done repeatedly on a schedule, checked in per day, never finished. Every day unless given weekdays. If a live Routine of that title already exists it is returned as is.',
+      inputSchema: {
+        title: z.string().min(1),
+        schedule: schedule.optional().describe("Default 'daily'"),
+        note: z.string().optional().describe('Free text, e.g. "currently: Peak"'),
+      },
+      annotations: { idempotentHint: true },
+    },
+    async ({ title, schedule: given, note }) => {
+      const routines = await routineList()
+      const date = today()
+      const existing = findRoutine(routines, title)
+      if (existing && !existing.archived) return ok({ ...routineView(existing, date), alreadyExists: true })
+      const ts = now()
+      const routine: RoutineRecord = {
+        id: nanoid(10),
+        title: title.trim(),
+        schedule: scheduleFrom(given ?? 'daily'),
+        note: note ?? '',
+        archived: false,
+        createdAt: ts,
+        updatedAt: ts,
+      }
+      await records.put([live('routine', routine)])
+      return ok(routineView(attach(routine, []), date))
+    },
+  )
+
+  server.registerTool(
+    'update_routine',
+    {
+      title: 'Update Routine',
+      description: 'Rename a Routine, change its schedule or note, or archive / restore it. Check-ins are untouched.',
+      inputSchema: {
+        routine: z.string().describe('Routine title (case-insensitive) or id'),
+        title: z.string().min(1).optional(),
+        schedule: schedule.optional(),
+        note: z.string().optional(),
+        archived: z.boolean().optional(),
+      },
+      annotations: { destructiveHint: false, idempotentHint: true },
+    },
+    async ({ routine: ref, title, schedule: given, note, archived }) => {
+      const routines = await routineList()
+      const routine = findRoutine(routines, ref)
+      if (!routine) return noRoutine(ref, routines)
+      const { checkIns, ...record } = routine
+      const next: RoutineRecord = {
+        ...record,
+        ...(title !== undefined && { title: title.trim() }),
+        ...(given !== undefined && { schedule: scheduleFrom(given) }),
+        ...(note !== undefined && { note }),
+        ...(archived !== undefined && { archived }),
+        updatedAt: now(),
+      }
+      await records.put([live('routine', next)])
+      return ok(routineView({ ...next, checkIns }, today()))
     },
   )
 
