@@ -1,5 +1,5 @@
-import { useState, type ComponentType } from 'react'
-import { NavLink, Outlet } from 'react-router-dom'
+import { useMemo, useState } from 'react'
+import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import type { ISODate, Task } from '../domain/task'
 import type { Minutes, NewBlock } from '../domain/block'
 import { TaskEditor } from './TaskEditor'
@@ -8,16 +8,14 @@ import { BlockSheet } from './BlockSheet'
 import { PlacementSheet } from './PlacementSheet'
 import { SpaceSwitcher } from './SpaceSwitcher'
 import { SyncBadge } from './SyncBadge'
-import { ArchiveIcon, BoardIcon, CalendarIcon, HomeIcon, ListIcon, PlusIcon, WeekIcon } from './icons'
+import { Jump } from './Jump'
+import { ShortcutsSheet } from './ShortcutsSheet'
+import { useShortcuts } from './useShortcuts'
+import { PAGES } from './pages'
+import { ArchiveIcon, PlusIcon } from './icons'
 
 /** The five mobile tabs (the platform maximum). Archive is desktop-sidebar only, plus a footer link on List (Q29). */
-const NAV: { to: string; label: string; Icon: ComponentType<{ size?: number }> }[] = [
-  { to: '/home', label: 'Home', Icon: HomeIcon },
-  { to: '/week', label: 'Week', Icon: WeekIcon },
-  { to: '/board', label: 'Board', Icon: BoardIcon },
-  { to: '/list', label: 'List', Icon: ListIcon },
-  { to: '/calendar', label: 'Calendar', Icon: CalendarIcon },
-]
+const NAV = PAGES.filter((p) => p.to !== '/archive')
 
 const sidebarLink = ({ isActive }: { isActive: boolean }) =>
   `flex min-h-10 items-center gap-2.5 rounded-lg px-3 text-sm ${
@@ -40,6 +38,24 @@ export function Shell() {
   const [quickAddOpen, setQuickAddOpen] = useState(false)
   const [blockSheet, setBlockSheet] = useState<BlockSheetState | null>(null)
   const [placementSheet, setPlacementSheet] = useState<PlacementSheetState | null>(null)
+  const [jumpOpen, setJumpOpen] = useState(false)
+  const [keysOpen, setKeysOpen] = useState(false)
+  const navigate = useNavigate()
+
+  // PD-15, PD-16: bare keys outside text fields; off while any sheet is up so a letter
+  // typed into a sheet's field, or Esc, never reaches here.
+  const sheetUp = editingId !== null || quickAddOpen || blockSheet !== null || placementSheet !== null || jumpOpen || keysOpen
+  const bindings = useMemo(
+    () => ({
+      n: () => setQuickAddOpen(true),
+      '?': () => setKeysOpen(true),
+      'meta+k': () => setJumpOpen(true),
+      ...Object.fromEntries(PAGES.map((p) => [p.key, () => navigate(p.to)])),
+    }),
+    [navigate],
+  )
+  useShortcuts(bindings, !sheetUp)
+  useShortcuts(useMemo(() => ({ 'meta+k': () => setJumpOpen(true) }), []), sheetUp && !jumpOpen)
 
   const shell: ShellContext = {
     openTask: setEditingId,
@@ -127,6 +143,8 @@ export function Shell() {
       {blockSheet && <BlockSheet {...blockSheet} onClose={() => setBlockSheet(null)} />}
       {placementSheet && <PlacementSheet {...placementSheet} onClose={() => setPlacementSheet(null)} />}
       {quickAddOpen && <QuickAdd onClose={() => setQuickAddOpen(false)} />}
+      {jumpOpen && <Jump onClose={() => setJumpOpen(false)} onOpenTask={setEditingId} />}
+      {keysOpen && <ShortcutsSheet onClose={() => setKeysOpen(false)} />}
     </div>
   )
 }
