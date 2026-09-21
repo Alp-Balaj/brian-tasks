@@ -21,6 +21,10 @@ export default defineRailway(() => {
       APP_PASSWORD: preserve(),
       SESSION_SECRET: preserve(),
       MCP_TOKEN: preserve(), // what Claude and the CLI present at /api/mcp
+      // Web Push (PD-17): `npx web-push generate-vapid-keys`; rotating them drops every Device's subscription.
+      VAPID_PUBLIC_KEY: preserve(),
+      VAPID_PRIVATE_KEY: preserve(),
+      VAPID_SUBJECT: preserve(),
       TZ: 'Europe/Amsterdam', // "today" for the MCP tools; the app itself uses the Device's clock
     },
   })
