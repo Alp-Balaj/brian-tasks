@@ -1,14 +1,19 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { addDays, format } from 'date-fns'
 import { blockNames, blocksInWeek, shiftDate, weekDays, weekOf, type WeekKey } from '../../domain/block'
 import { useBlocks } from '../../store/blocks'
+import { useTasks } from '../../store/tasks'
+import { useRoutines } from '../../store/routines'
+import { useShell } from '../../components/useShell'
+import { describeReview, weekReview } from '../../domain/review'
 import { useToday } from '../../lib/useToday'
 import { ChevronLeftIcon, ChevronRightIcon } from '../../components/icons'
 import { ChipButton, IconButton } from '../../components/ui'
 import { DayRow } from './DayRow'
 import { ROW_GRID } from './layout'
 import { TimeRuler } from './TimeRuler'
+import { ReviewSheet } from './ReviewSheet'
 
 /** "21–27 Sep 2026", "28 Sep – 4 Oct 2026", "29 Dec 2025 – 4 Jan 2026". */
 function describeWeek(week: WeekKey): string {
@@ -41,6 +46,18 @@ export function WeekView() {
   const blocks = useBlocks((s) => s.blocks)
   const legend = useMemo(() => blockNames(blocksInWeek(blocks, week)), [blocks, week])
 
+  // PD-12: one quiet line once the week has begun; the sheet behind it.
+  const tasks = useTasks((s) => s.tasks)
+  const routines = useRoutines((s) => s.routines)
+  const placements = useBlocks((s) => s.placements)
+  const { openTask } = useShell()
+  const [reviewing, setReviewing] = useState(false)
+  const begun = week <= thisWeek
+  const summary = useMemo(
+    () => (begun ? describeReview(weekReview(tasks, routines, blocks, placements, week, today)) : undefined),
+    [begun, tasks, routines, blocks, placements, week, today],
+  )
+
   const go = (target: WeekKey) => setParams(target === thisWeek ? {} : { w: target })
   const relative = week === thisWeek ? 'This week' : week === shiftDate(thisWeek, 7) ? 'Next week' : week === shiftDate(thisWeek, -7) ? 'Last week' : undefined
 
@@ -52,13 +69,20 @@ export function WeekView() {
         </IconButton>
         <div className="flex min-w-0 flex-col items-center">
           <h1 className="truncate text-base font-semibold tracking-tight md:text-lg">{describeWeek(week)}</h1>
-          {relative ? (
-            <span className="text-xs text-fg-muted">{relative}</span>
-          ) : (
-            <ChipButton onClick={() => go(thisWeek)} className="mt-0.5 min-h-7 px-2.5 text-xs">
-              This week
-            </ChipButton>
-          )}
+          <span className="flex flex-wrap items-center justify-center gap-x-2 text-xs text-fg-muted">
+            {relative ? (
+              <span>{relative}</span>
+            ) : (
+              <ChipButton onClick={() => go(thisWeek)} className="mt-0.5 min-h-7 px-2.5 text-xs">
+                This week
+              </ChipButton>
+            )}
+            {summary && (
+              <button onClick={() => setReviewing(true)} className="tabular-nums hover:text-fg" title="Look back at this week">
+                {summary}
+              </button>
+            )}
+          </span>
         </div>
         <IconButton label="Next week" onClick={() => go(shiftDate(week, 7))}>
           <ChevronRightIcon />
@@ -89,6 +113,17 @@ export function WeekView() {
 
       {legend.length === 0 && (
         <p className="px-1 text-center text-xs text-fg-faint">No blocks this week. Tap a day's name to add one.</p>
+      )}
+
+      {reviewing && (
+        <ReviewSheet
+          week={week}
+          onClose={() => setReviewing(false)}
+          onOpenTask={(id) => {
+            setReviewing(false)
+            openTask(id)
+          }}
+        />
       )}
     </div>
   )

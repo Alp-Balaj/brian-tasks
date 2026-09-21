@@ -1,8 +1,14 @@
 import { useState } from 'react'
+import { format } from 'date-fns'
 import { useRoutines } from '../store/routines'
 import { Sheet } from './Sheet'
-import { Button, SectionLabel, field } from './ui'
+import { Button, IconButton, SectionLabel, field } from './ui'
+import { ChevronLeftIcon, ChevronRightIcon } from './icons'
+import { monthGrid, shiftMonth, toISODate } from '../lib/dates'
+import { useToday } from '../lib/useToday'
 import {
+  isMissed,
+  isScheduledOn,
   WEEKDAYS_MONDAY_FIRST,
   WEEKDAY_SHORT,
   type NewRoutine,
@@ -30,6 +36,9 @@ export function RoutineEditor({ routineId, onClose }: Props) {
   const add = useRoutines((s) => s.add)
   const update = useRoutines((s) => s.update)
   const archive = useRoutines((s) => s.archive)
+  const checkIn = useRoutines((s) => s.checkIn)
+  const uncheck = useRoutines((s) => s.uncheck)
+  const today = useToday()
   const [draft, setDraft] = useState<NewRoutine>(EMPTY_DRAFT)
 
   const isNew = routineId === null
@@ -110,6 +119,8 @@ export function RoutineEditor({ routineId, onClose }: Props) {
           />
         </label>
 
+        {/* PD-14: how the Routine has been going, drawn not scored. */}
+        {!isNew && <HistoryGrid routine={routine!} onToggleToday={(done) => (done ? checkIn : uncheck)(routineId, today)} />}
       </form>
     </Sheet>
   )
@@ -166,6 +177,80 @@ function ScheduleField({ value, onChange }: { value: Schedule; onChange: (s: Sch
         </div>
       )}
       {!daily && days.length === 0 && <span className="text-xs text-fg-faint">Never scheduled — pick at least one day.</span>}
+    </div>
+  )
+}
+
+/**
+ * PD-14: a month of the Routine, Monday-first: each day checked, missed, not
+ * scheduled, or not yet. Read-only except today (Q22), which toggles its Check-in.
+ */
+function HistoryGrid({ routine, onToggleToday }: { routine: Routine; onToggleToday: (done: boolean) => void }) {
+  const today = useToday()
+  const [month, setMonth] = useState(() => new Date(`${today.slice(0, 7)}-01T12:00:00`))
+  const days = monthGrid(month)
+  const todayDate = new Date(`${today}T12:00:00`)
+  const first = routine.createdAt.slice(0, 10)
+
+  const cell = (date: Date) => {
+    const iso = toISODate(date)
+    const inMonth = date.getMonth() === month.getMonth()
+    const done = routine.checkIns.includes(iso)
+    const isToday = iso === today
+    const future = iso > today
+    const before = iso < first && !done
+    const missed = !before && isMissed(routine, date, todayDate)
+    const scheduled = isScheduledOn(routine.schedule, date)
+    const tone = done
+      ? 'bg-success text-white'
+      : missed
+        ? 'border border-danger/60 text-danger'
+        : isToday && scheduled
+          ? 'border border-fg text-fg'
+          : scheduled && !future && !before
+            ? 'bg-surface-2 text-fg-muted'
+            : 'text-fg-faint'
+    const label = `${format(date, 'EEE d MMM')}: ${done ? 'done' : missed ? 'missed' : isToday ? 'today' : scheduled ? (future ? 'not yet' : 'no check-in') : 'not scheduled'}`
+    const body = (
+      <span className={`grid h-8 w-8 place-items-center rounded-full text-xs tabular-nums ${tone} ${inMonth ? '' : 'opacity-30'}`}>
+        {date.getDate()}
+      </span>
+    )
+    return (
+      <li key={iso} className="grid place-items-center" title={label}>
+        {isToday ? (
+          <button type="button" onClick={() => onToggleToday(!done)} aria-label={`${label}. ${done ? 'Uncheck' : 'Check in'}`} aria-pressed={done}>
+            {body}
+          </button>
+        ) : (
+          <span aria-label={label}>{body}</span>
+        )}
+      </li>
+    )
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center justify-between">
+        <SectionLabel>History</SectionLabel>
+        <span className="flex items-center gap-1">
+          <IconButton label="Previous month" onClick={() => setMonth((m) => shiftMonth(m, -1))} className="h-8 w-8">
+            <ChevronLeftIcon size={16} />
+          </IconButton>
+          <span className="w-24 text-center text-xs text-fg-muted">{format(month, 'MMM yyyy')}</span>
+          <IconButton label="Next month" onClick={() => setMonth((m) => shiftMonth(m, 1))} className="h-8 w-8">
+            <ChevronRightIcon size={16} />
+          </IconButton>
+        </span>
+      </div>
+      <ul aria-hidden className="grid grid-cols-7 text-center text-[10px] text-fg-faint">
+        {WEEKDAYS_MONDAY_FIRST.map((d) => (
+          <li key={d}>{WEEKDAY_SHORT[d][0]}</li>
+        ))}
+      </ul>
+      <ul aria-label="History" className="grid grid-cols-7 gap-y-1">
+        {days.map(cell)}
+      </ul>
     </div>
   )
 }
