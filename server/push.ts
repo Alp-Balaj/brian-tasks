@@ -107,7 +107,8 @@ const forget = (endpoint: string) => pool.query('DELETE FROM push_subscriptions 
 /** The routes a Device uses to opt in and out (PD-17); the session cookie guards them. */
 export function pushApp(): Hono {
   const app = new Hono()
-  app.get('/key', (c) => (configured() ? c.json({ key: process.env.VAPID_PUBLIC_KEY }) : c.text('Notifications are not set up on this server', 503)))
+  // `key: null` (not an error) when the server has no keys: the bell asks on every open.
+  app.get('/key', (c) => c.json({ key: configured() ? process.env.VAPID_PUBLIC_KEY : null }))
   app.post('/subscribe', requireSession, async (c) => {
     if (!configured()) return c.text('Notifications are not set up on this server', 503)
     const body = await c.req.json<{ subscription?: PushSubscription; tz?: string }>().catch(() => null)

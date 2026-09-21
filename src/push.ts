@@ -7,33 +7,32 @@ export type PushState = 'unsupported' | 'unavailable' | 'denied' | 'off' | 'on'
 
 const supported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window
 
-async function registration(): Promise<ServiceWorkerRegistration> {
-  return navigator.serviceWorker.ready
-}
+/** The app's service worker, or null when none is registered (the dev server has none). `ready` would wait forever. */
+const registration = (): Promise<ServiceWorkerRegistration | undefined> => navigator.serviceWorker.getRegistration()
 
-/** Where this Device stands. `unavailable` = the server has no keys. */
+/** Where this Device stands. `unavailable` = the server has no keys, or no worker is registered. */
 export async function pushState(): Promise<PushState> {
   if (!supported()) return 'unsupported'
   if (Notification.permission === 'denied') return 'denied'
-  const key = await serverKey().catch(() => null)
-  if (key === null) return 'unavailable'
-  const sub = await (await registration()).pushManager.getSubscription()
+  const [key, reg] = await Promise.all([serverKey().catch(() => null), registration()])
+  if (key === null || !reg) return 'unavailable'
+  const sub = await reg.pushManager.getSubscription()
   return sub ? 'on' : 'off'
 }
 
 async function serverKey(): Promise<string | null> {
   const res = await fetch('/api/push/key', { credentials: 'same-origin' })
-  if (res.status === 503) return null
   if (!res.ok) throw new ApiError(res.status, res.statusText)
-  return ((await res.json()) as { key: string }).key
+  return ((await res.json()) as { key: string | null }).key
 }
 
 export async function enablePush(): Promise<PushState> {
   if (!supported()) return 'unsupported'
   const key = await serverKey()
   if (key === null) return 'unavailable'
-  if ((await Notification.requestPermission()) !== 'granted') return 'denied'
   const reg = await registration()
+  if (!reg) return 'unavailable'
+  if ((await Notification.requestPermission()) !== 'granted') return 'denied'
   const sub = (await reg.pushManager.getSubscription()) ?? (await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: toBytes(key) }))
   const res = await fetch('/api/push/subscribe', {
     method: 'POST',
@@ -47,7 +46,7 @@ export async function enablePush(): Promise<PushState> {
 
 export async function disablePush(): Promise<PushState> {
   if (!supported()) return 'unsupported'
-  const sub = await (await registration()).pushManager.getSubscription()
+  const sub = await (await registration())?.pushManager.getSubscription()
   if (!sub) return 'off'
   await fetch('/api/push/subscribe', {
     method: 'DELETE',
