@@ -203,6 +203,7 @@ function PlacedLine({ task }: { task: Task }) {
 function DateField({ label, value, onChange }: { label: string; value?: ISODate; onChange: (v?: ISODate) => void }) {
   const today = toISODate(new Date())
   const tomorrow = shiftISODate(today, 1)
+  const nextWeek = shiftISODate(today, 7)
   return (
     <Field label={value ? `${label} · ${formatDay(value, today)}` : label}>
       <input type="date" value={value ?? ''} onChange={(e) => onChange(e.target.value || undefined)} className={field} />
@@ -212,6 +213,10 @@ function DateField({ label, value, onChange }: { label: string; value?: ISODate;
         </ChipButton>
         <ChipButton active={value === tomorrow} onClick={() => onChange(tomorrow)} className="min-h-8 px-2.5 text-xs">
           Tomorrow
+        </ChipButton>
+        {/* PD-10: the editor's own Later. */}
+        <ChipButton active={value === nextWeek} onClick={() => onChange(nextWeek)} className="min-h-8 px-2.5 text-xs">
+          Next week
         </ChipButton>
         {value && (
           <ChipButton onClick={() => onChange(undefined)} className="min-h-8 px-2.5 text-xs">

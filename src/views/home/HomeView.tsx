@@ -13,6 +13,8 @@ import { CloseIcon } from '../../components/icons'
 import { RoutinesSection } from './RoutinesSection'
 import { HomeTaskRow } from './HomeTaskRow'
 import { TodayStrip } from './TodayStrip'
+import { CloseDay } from './CloseDay'
+import { LaterMenu } from '../../components/LaterMenu'
 import { homeSections } from '../../domain/home'
 
 /** Rows shown per section before "Show more" (Q5: Home is glanceable, not exhaustive). */
@@ -73,6 +75,16 @@ export function HomeView() {
   const setLinger = (fn: (m: Map<string, Task>) => Map<string, Task>) => setLingering({ day: today, map: fn(linger) })
 
   const live = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks])
+
+  // PD-10: the Later sheet, open on one task and the date that put it on Today.
+  const [laterOn, setLaterOn] = useState<{ id: string; field: 'due' | 'scheduled' } | null>(null)
+  const laterChip = (task: Task, field: 'due' | 'scheduled') =>
+    live.get(task.id)?.status === 'done' ? undefined : (
+      <ChipButton onClick={() => setLaterOn({ id: task.id, field })} className="min-h-8 px-2.5 text-xs" title="Move off today">
+        Later
+      </ChipButton>
+    )
+
   const placed = useMemo(
     () => tasks.map((t) => (t.status === 'done' ? (linger.get(t.id) ?? t) : t)),
     [tasks, linger],
@@ -145,7 +157,11 @@ export function HomeView() {
 
       <TodayStrip today={today} />
 
-      <Section title="Today" items={todayRows} render={({ task, reason }) => row(task, { reason })} />
+      <Section
+        title="Today"
+        items={todayRows}
+        render={({ task, reason }) => row(task, { reason, trailing: laterChip(task, reason === 'due today' ? 'due' : 'scheduled') })}
+      />
 
       <Section
         title="Overdue"
@@ -155,9 +171,12 @@ export function HomeView() {
           row(t, {
             trailing:
               live.get(t.id)?.status === 'done' ? undefined : (
-                <ChipButton onClick={() => update(t.id, { due: today })} className="min-h-8 px-2.5 text-xs" title="Move due date to today">
-                  → Today
-                </ChipButton>
+                <span className="flex shrink-0 items-center gap-1">
+                  <ChipButton onClick={() => update(t.id, { due: today })} className="min-h-8 px-2.5 text-xs" title="Move due date to today">
+                    → Today
+                  </ChipButton>
+                  {laterChip(t, 'due')}
+                </span>
               ),
           })
         }
@@ -187,6 +206,10 @@ export function HomeView() {
       <Section title="In progress" items={inProgress} render={(t) => row(t)} />
 
       {empty && <p className="py-10 text-center text-sm text-fg-faint">Nothing needs you right now.</p>}
+
+      <CloseDay today={today} onOpen={openTask} />
+
+      {laterOn && <LaterMenu taskId={laterOn.id} field={laterOn.field} onClose={() => setLaterOn(null)} />}
     </div>
   )
 }
