@@ -140,6 +140,27 @@ export const dateInWeek = (week: WeekKey, weekday: Weekday): ISODate =>
 
 // ---- Blocks ------------------------------------------------------------------------
 
+/**
+ * The Block `addBlock` and the MCP `create_block` write: one-off unless `carry`, so
+ * the rule ends at the following week (TB-4, D2). The caller generates the id, as
+ * with `buildTask`.
+ */
+export function buildBlock(input: NewBlock, id: string, now: ISODateTime): Block {
+  return {
+    id,
+    name: input.name.trim(),
+    colour: input.colour,
+    weekday: input.weekday,
+    start: input.start,
+    end: input.end,
+    from: input.week,
+    ...(input.carry ? {} : { until: nextWeek(input.week) }),
+    routineIds: input.routineIds ?? [],
+    createdAt: now,
+    updatedAt: now,
+  }
+}
+
 /** Whether this version of the block is in force in `week` (D1, D2). */
 export function appliesTo(block: Block, week: WeekKey): boolean {
   return block.from <= week && (block.until === undefined || week < block.until)
@@ -258,6 +279,105 @@ export function unplacedOn(tasks: readonly Task[], placements: readonly Placemen
 export function isStalePlacement(p: Placement, task: Task, placements: readonly Placement[]): boolean {
   if (task.scheduled === undefined || task.scheduled === p.date) return false
   return !placedDays(placements, task.id).includes(task.scheduled)
+}
+
+// ---- Placement revisions -----------------------------------------------------------
+// What a Block change does to its Placements, as data: the whole list afterwards, plus
+// the ones rewritten and the ones taken out, so a store can bury the latter and a
+// Task's Scheduled can follow (D9). The app's store and the MCP tools both apply these.
+
+export interface PlacementChange {
+  /** Every placement after the change, in the original order. */
+  placements: Placement[]
+  /** The ones rewritten, with a fresh `updatedAt`. */
+  changed: Placement[]
+  /** The ones taken out. */
+  removed: Placement[]
+}
+
+function revise(
+  placements: readonly Placement[],
+  hit: (p: Placement) => boolean,
+  edit: (p: Placement) => Placement | undefined,
+): PlacementChange {
+  const change: PlacementChange = { placements: [], changed: [], removed: [] }
+  for (const p of placements) {
+    if (!hit(p)) {
+      change.placements.push(p)
+      continue
+    }
+    const next = edit(p)
+    if (next) {
+      change.placements.push(next)
+      change.changed.push(next)
+    } else change.removed.push(p)
+  }
+  return change
+}
+
+/** The Tasks whose placements a change touched, unique: the ones whose Scheduled to re-derive. */
+export function touchedTasks(change: PlacementChange): string[] {
+  return [...new Set([...change.changed, ...change.removed].map((p) => p.taskId))]
+}
+
+/** D8: after a split at `week`, the placements dated `week` or later move to the future version. */
+export function repointPlacements(
+  placements: readonly Placement[],
+  fromId: string,
+  toId: string,
+  week: WeekKey,
+  now: ISODateTime,
+): PlacementChange {
+  return revise(
+    placements,
+    (p) => p.blockId === fromId && p.date >= week,
+    (p) => ({ ...p, blockId: toId, updatedAt: now }),
+  )
+}
+
+/** The slot moved to another weekday; what was put in it goes along, same week, new day. */
+export function movePlacements(
+  placements: readonly Placement[],
+  blockId: string,
+  weekday: Weekday,
+  now: ISODateTime,
+): PlacementChange {
+  return revise(
+    placements,
+    (p) => p.blockId === blockId,
+    (p) => ({ ...p, date: dateInWeek(weekOf(p.date), weekday), updatedAt: now }),
+  )
+}
+
+/**
+ * Take the placements of one block version out of it, from `fromDate` on: untimed
+ * ones have nothing left to draw and are removed; timed ones keep their hour and
+ * lose the link.
+ */
+export function unlinkPlacements(
+  placements: readonly Placement[],
+  blockId: string,
+  now: ISODateTime,
+  fromDate: ISODate = '',
+): PlacementChange {
+  return revise(
+    placements,
+    (p) => p.blockId === blockId && p.date >= fromDate,
+    (p) => {
+      if (!isTimed(p)) return undefined
+      const { blockId: _gone, ...rest } = p
+      return { ...rest, updatedAt: now }
+    },
+  )
+}
+
+/** Remove every placement of one block version from `fromDate` on, timed or not. */
+export function removePlacementsOf(placements: readonly Placement[], blockId: string, fromDate: ISODate): PlacementChange {
+  return revise(
+    placements,
+    (p) => p.blockId === blockId && p.date >= fromDate,
+    () => undefined,
+  )
 }
 
 // ---- Time -------------------------------------------------------------------------

@@ -92,8 +92,9 @@ appointments, not a time tracker, not a second task list.
 ## Deliberately out
 
 - **TB-23** No "this week only" edits of standing blocks; no rhythms beyond weekly; no
-  computed open-time totals; no write-back to Tasks beyond Scheduled; MCP/CLI tools for
-  blocks come later (only `today` reports today's blocks and the current one).
+  computed open-time totals; no write-back to Tasks beyond Scheduled; no MCP/CLI tools
+  for Placements (`today` reports them). Block tools (`list_blocks`, `create_block`,
+  `update_block`, `delete_block`) were added after v1, on the same TB-5 rules as the sheet.
 
 ---
 
@@ -426,7 +427,12 @@ Enabled only when `matchMedia('(pointer: fine)')`. On the ruler div:
   gains `at` when linked. `INSTRUCTIONS` gets one sentence on Blocks and Placements.
 - `cli/brian.ts` `printToday`: print the `now` line and the blocks list above the
   routines.
-- No write tools in v1 (TB-23).
+- No write tools in v1 (TB-23). Added after v1: `list_blocks`, `create_block`,
+  `update_block` (from a week on, TB-5), `delete_block` (from a week on, or
+  `everywhere`). They apply the same placement revisions as the store
+  (`domain/block.ts`: `buildBlock`, `repointPlacements`, `movePlacements`,
+  `unlinkPlacements`, `removePlacementsOf`), so a Block changed from a chat is
+  indistinguishable from one changed in the sheet.
 
 ## 7. Tests
 

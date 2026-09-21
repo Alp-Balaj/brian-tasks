@@ -353,3 +353,209 @@ describe('spaces', () => {
     expect((await call('update_space', { space: 'Uni', name: 'x' })).isError).toBe(true)
   })
 })
+
+describe('blocks', () => {
+  // Weeks: W_1 = Mon 2026-09-07, W0 = Mon 2026-09-14 (NOW's week), W1 = Mon 2026-09-21.
+  const W_1 = '2026-09-07'
+  const W0 = '2026-09-14'
+  const W1 = '2026-09-21'
+  const t0 = '2026-09-01T00:00:00.000Z'
+  const block = (id: string, rest: Partial<Block>): Block => ({
+    id,
+    name: id,
+    colour: '#64748b',
+    weekday: 1,
+    start: 9 * 60,
+    end: 17 * 60,
+    from: W0,
+    routineIds: [],
+    createdAt: t0,
+    updatedAt: t0,
+    ...rest,
+  })
+  const placement = (id: string, taskId: string, rest: Partial<Placement>): Placement => ({
+    id,
+    taskId,
+    date: W0,
+    createdAt: t0,
+    updatedAt: t0,
+    ...rest,
+  })
+  const stored = <T>(kind: string, id: string) => records.rows.get(`${kind}:${id}`)!.data as T
+  const isGone = (kind: string, id: string) => records.rows.get(`${kind}:${id}`)!.deleted
+  const liveBlocks = () => [...records.rows.values()].filter((r) => r.kind === 'block' && !r.deleted).map((r) => r.data as Block)
+  const ids = (blocks: Block[]) => blocks.map((b) => b.id)
+
+  beforeEach(async () => {
+    await records.put([
+      // Standing since last week, Mondays, with the Gym routine in it.
+      liveRow('block', 'job', block('job', { name: 'Job', from: W_1, routineIds: ['r2'], colour: '#4f6fd8' })),
+      // One-off this week, Wednesday.
+      liveRow('block', 'gym', block('gym', { name: 'Gym', weekday: 3, start: 10 * 60, end: 11 * 60, until: W1 })),
+      // Last week's Job placement, this week's, and next week's (timed).
+      liveRow('placement', 'p0', placement('p0', 'b', { blockId: 'job', date: W_1 })),
+      liveRow('placement', 'p1', placement('p1', 'a', { blockId: 'job', date: W0 })),
+      liveRow('placement', 'p2', placement('p2', 'a', { blockId: 'job', date: W1, start: 9 * 60, end: 10 * 60 })),
+    ])
+  })
+
+  it('list_blocks shows the week in force, Monday first, with ids, dates, carry and routines', async () => {
+    const { data } = await call('list_blocks')
+    expect(data.week).toBe(W0)
+    expect(data.blocks).toEqual([
+      { id: 'job', name: 'Job', colour: 'blue', day: 'Mon', date: W0, start: '09:00', end: '17:00', carry: true, routines: ['Gym'] },
+      { id: 'gym', name: 'Gym', colour: 'slate', day: 'Wed', date: '2026-09-16', start: '10:00', end: '11:00', carry: false, routines: [] },
+    ])
+    // Next week: the one-off is gone; the standing one is still there.
+    const next = await call('list_blocks', { week: '2026-09-25' })
+    expect(ids(next.data.blocks)).toEqual(['job'])
+    expect(next.data.blocks[0].date).toBe(W1)
+  })
+
+  it('create_block is one-off by default, snaps times, and reuses the colour of its name', async () => {
+    const { data } = await call('create_block', { name: 'Job', date: '2026-09-22', start: '08:05', end: '12:10' })
+    expect(data).toMatchObject({ name: 'Job', colour: 'blue', day: 'Tue', date: '2026-09-22', start: '08:00', end: '12:15', carry: false })
+    const b = stored<Block>('block', data.id)
+    expect(b).toMatchObject({ weekday: 2, start: 480, end: 735, from: W1, until: '2026-09-28', routineIds: [] })
+    sameDay(b.updatedAt)
+  })
+
+  it('create_block makes a standing Block with routines by title and a colour by name', async () => {
+    const { data } = await call('create_block', {
+      name: 'Morning',
+      date: TODAY,
+      start: '06:00',
+      end: '08:00',
+      carry: true,
+      colour: 'amber',
+      routines: ['read 20 pages'],
+    })
+    expect(data).toMatchObject({ day: 'Sun', carry: true, colour: 'amber', routines: ['Read 20 pages'] })
+    expect(stored<Block>('block', data.id)).toMatchObject({ weekday: 0, from: W0, routineIds: ['r1'] })
+    expect('until' in stored<Block>('block', data.id)).toBe(false)
+  })
+
+  it('create_block picks a free palette colour for a new name', async () => {
+    const { data } = await call('create_block', { name: 'Sleep', date: TODAY, start: '22:00', end: '24:00' })
+    // slate and blue are taken by Gym and Job.
+    expect(data.colour).toBe('red')
+    expect(data.end).toBe('24:00')
+  })
+
+  it('create_block refuses an empty span and an unknown routine', async () => {
+    const bad = await call('create_block', { name: 'X', date: TODAY, start: '10:00', end: '10:05' })
+    expect(bad.isError).toBe(true)
+    expect(bad.text).toContain('end after it starts')
+    const who = await call('create_block', { name: 'X', date: TODAY, start: '10:00', end: '11:00', routines: ['Yoga'] })
+    expect(who.isError).toBe(true)
+    expect(who.text).toContain('No Routine called "Yoga"')
+  })
+
+  it('update_block patches a version that starts this week in place', async () => {
+    const { data } = await call('update_block', { id: 'gym', name: 'Lift', start: '10:30', colour: 'green', routines: ['Gym'] })
+    expect(data).toMatchObject({ id: 'gym', name: 'Lift', colour: 'green', start: '10:30', end: '11:00', routines: ['Gym'] })
+    expect(liveBlocks()).toHaveLength(2)
+    expect(stored<Block>('block', 'gym')).toMatchObject({ name: 'Lift', start: 630, routineIds: ['r2'], until: W1 })
+  })
+
+  it('update_block splits a standing Block that started earlier (TB-5, D8) and re-points placements from that week', async () => {
+    const { data } = await call('update_block', { id: 'job', end: '16:00' })
+    expect(data.id).not.toBe('job')
+    expect(data).toMatchObject({ name: 'Job', end: '16:00', carry: true, routines: ['Gym'] })
+    // Past version keeps its id and ends at this week; the future one starts here.
+    expect(stored<Block>('block', 'job')).toMatchObject({ end: 17 * 60, until: W0 })
+    expect(stored<Block>('block', data.id)).toMatchObject({ end: 16 * 60, from: W0 })
+    expect('until' in stored<Block>('block', data.id)).toBe(false)
+    expect(stored<Placement>('placement', 'p0').blockId).toBe('job')
+    expect(stored<Placement>('placement', 'p1').blockId).toBe(data.id)
+    expect(stored<Placement>('placement', 'p2').blockId).toBe(data.id)
+    expect(data.placementsChanged).toBe(2)
+    // Listing next week shows only the new version.
+    expect(ids((await call('list_blocks', { week: W1 })).data.blocks)).toEqual([data.id])
+  })
+
+  it('update_block from a later week leaves this week alone', async () => {
+    const { data } = await call('update_block', { id: 'job', from: '2026-09-23', name: 'Work' })
+    expect((await call('list_blocks')).data.blocks[0]).toMatchObject({ id: 'job', name: 'Job' })
+    expect((await call('list_blocks', { week: W1 })).data.blocks[0]).toMatchObject({ id: data.id, name: 'Work' })
+    expect(stored<Placement>('placement', 'p1').blockId).toBe('job')
+    expect(stored<Placement>('placement', 'p2').blockId).toBe(data.id)
+  })
+
+  it('update_block moves the placed Tasks along when the weekday changes', async () => {
+    const { data } = await call('update_block', { id: 'job', weekday: 'thu' })
+    expect(data).toMatchObject({ day: 'Thu', date: '2026-09-17' })
+    expect(stored<Placement>('placement', 'p0').date).toBe(W_1)
+    expect(stored<Placement>('placement', 'p1').date).toBe('2026-09-17')
+    expect(stored<Placement>('placement', 'p2').date).toBe('2026-09-24')
+    // The Task follows its earliest placement (D9).
+    expect(stored<Task>('task', 'a').scheduled).toBe('2026-09-17')
+  })
+
+  it('update_block turns carry off from a week on and unlinks what was in the weeks it drops', async () => {
+    const { data } = await call('update_block', { id: 'job', carry: false })
+    expect(data).toMatchObject({ carry: false })
+    expect(stored<Block>('block', data.id).until).toBe(W1)
+    // Next week's timed placement keeps its hour and loses the link; this week's stays.
+    expect(stored<Placement>('placement', 'p2')).toMatchObject({ start: 540, end: 600 })
+    expect('blockId' in stored<Placement>('placement', 'p2')).toBe(false)
+    expect(stored<Placement>('placement', 'p1').blockId).toBe(data.id)
+    expect((await call('list_blocks', { week: W1 })).data.blocks).toEqual([])
+  })
+
+  it('update_block turns carry on', async () => {
+    const { data } = await call('update_block', { id: 'gym', carry: true })
+    expect(data.carry).toBe(true)
+    expect(ids((await call('list_blocks', { week: '2026-10-30' })).data.blocks)).toContain('gym')
+  })
+
+  it('update_block refuses a week the version had already ended before, and unknown ids', async () => {
+    const ended = await call('update_block', { id: 'gym', from: W1, name: 'x' })
+    expect(ended.isError).toBe(true)
+    expect(ended.text).toContain('already ended')
+    expect((await call('update_block', { id: 'nope', name: 'x' })).isError).toBe(true)
+  })
+
+  it('delete_block ends a standing Block from this week on and removes its placements from then', async () => {
+    const { data } = await call('delete_block', { id: 'job' })
+    expect(data).toEqual({ id: 'job', name: 'Job', removedFrom: W0, placementsRemoved: 2 })
+    expect(stored<Block>('block', 'job').until).toBe(W0)
+    expect(isGone('placement', 'p0')).toBe(false)
+    expect(isGone('placement', 'p1')).toBe(true)
+    expect(isGone('placement', 'p2')).toBe(true)
+    expect(ids((await call('list_blocks')).data.blocks)).toEqual(['gym'])
+    expect(ids((await call('list_blocks', { week: W_1 })).data.blocks)).toEqual(['job'])
+  })
+
+  it('delete_block deletes outright a Block that starts in that week', async () => {
+    const { data } = await call('delete_block', { id: 'gym' })
+    expect(data).toEqual({ id: 'gym', name: 'Gym', deleted: true })
+    expect(isGone('block', 'gym')).toBe(true)
+  })
+
+  it('delete_block from a later week keeps this week', async () => {
+    const { data } = await call('delete_block', { id: 'job', from: W1 })
+    expect(data).toMatchObject({ removedFrom: W1, placementsRemoved: 1 })
+    expect(isGone('placement', 'p1')).toBe(false)
+    expect(isGone('placement', 'p2')).toBe(true)
+    expect(ids((await call('list_blocks')).data.blocks)).toEqual(['job', 'gym'])
+  })
+
+  it('delete_block everywhere buries the version; timed placements keep their hour, untimed ones go', async () => {
+    const { data } = await call('delete_block', { id: 'job', everywhere: true })
+    expect(data).toEqual({ id: 'job', name: 'Job', deleted: true, placementsChanged: 1, placementsRemoved: 2 })
+    expect(isGone('block', 'job')).toBe(true)
+    expect(isGone('placement', 'p0')).toBe(true)
+    expect(isGone('placement', 'p1')).toBe(true)
+    expect(stored<Placement>('placement', 'p2')).toMatchObject({ start: 540, end: 600 })
+    expect('blockId' in stored<Placement>('placement', 'p2')).toBe(false)
+    expect((await call('list_blocks', { week: W_1 })).data.blocks).toEqual([])
+  })
+
+  it('delete_block refuses a week the version had already ended before, unless everywhere', async () => {
+    const ended = await call('delete_block', { id: 'gym', from: W1 })
+    expect(ended.isError).toBe(true)
+    expect(ended.text).toContain('everywhere')
+    expect((await call('delete_block', { id: 'gym', from: W1, everywhere: true })).data.deleted).toBe(true)
+  })
+})

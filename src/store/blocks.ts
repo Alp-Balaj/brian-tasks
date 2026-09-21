@@ -1,19 +1,23 @@
 import { create } from 'zustand'
 import { nanoid } from 'nanoid'
-import type { ISODate } from '../domain/task'
 import {
   appliesTo,
-  dateInWeek,
+  buildBlock,
   isTimed,
+  movePlacements,
   nextWeek,
+  removePlacementsOf,
+  repointPlacements,
   scheduledFromPlacements,
   splitAt,
-  weekOf,
+  touchedTasks,
+  unlinkPlacements,
   type Block,
   type BlockPatch,
   type NewBlock,
   type NewPlacement,
   type Placement,
+  type PlacementChange,
   type PlacementPatch,
   type WeekKey,
 } from '../domain/block'
@@ -82,6 +86,13 @@ export const useBlocks = create<BlockState>((set, get) => {
     for (const taskId of new Set(touched)) syncScheduled(taskId)
   }
 
+  /** Keep a revision (domain/block.ts): the removed ones are buried, the touched Tasks re-derived. */
+  const applyChange = (change: PlacementChange) => {
+    const { bury } = useTombstones.getState()
+    for (const p of change.removed) bury('placement', p.id)
+    setPlacements(change.placements, touchedTasks(change))
+  }
+
   /**
    * The version of `id` that a change from `week` on lands in (TB-5): the block
    * itself when its rule starts in `week` or later, else the future half of a split
@@ -96,9 +107,7 @@ export const useBlocks = create<BlockState>((set, get) => {
     const { past, future } = splitAt(block, week, now(), nanoid(10))
     set({
       blocks: [...get().blocks.map((b) => (b.id === id ? past : b)), future],
-      placements: get().placements.map((p) =>
-        p.blockId === id && p.date >= week ? { ...p, blockId: future.id, updatedAt: future.updatedAt } : p,
-      ),
+      placements: repointPlacements(get().placements, id, future.id, week, future.updatedAt).placements,
     })
     return future
   }
@@ -106,66 +115,12 @@ export const useBlocks = create<BlockState>((set, get) => {
   const patchBlock = (id: string, fn: (b: Block) => Block) =>
     set({ blocks: get().blocks.map((b) => (b.id === id ? fn(b) : b)) })
 
-  /**
-   * Take the placements of one block version out of it, from `fromDate` on: untimed
-   * ones have nothing left to draw and are removed; timed ones keep their hour and
-   * lose the link.
-   */
-  const unlink = (blockId: string, fromDate: ISODate = '') => {
-    const { bury } = useTombstones.getState()
-    const ts = now()
-    const touched: string[] = []
-    const kept: Placement[] = []
-    for (const p of get().placements) {
-      if (p.blockId !== blockId || p.date < fromDate) {
-        kept.push(p)
-        continue
-      }
-      touched.push(p.taskId)
-      if (isTimed(p)) {
-        const { blockId: _gone, ...rest } = p
-        kept.push({ ...rest, updatedAt: ts })
-      } else {
-        bury('placement', p.id)
-      }
-    }
-    setPlacements(kept, touched)
-  }
-
-  /** Remove every placement of one block version from `fromDate` on, timed or not. */
-  const removePlacementsOf = (blockId: string, fromDate: ISODate) => {
-    const { bury } = useTombstones.getState()
-    const touched: string[] = []
-    const kept: Placement[] = []
-    for (const p of get().placements) {
-      if (p.blockId === blockId && p.date >= fromDate) {
-        touched.push(p.taskId)
-        bury('placement', p.id)
-      } else kept.push(p)
-    }
-    setPlacements(kept, touched)
-  }
-
   return {
     blocks: [],
     placements: [],
 
     addBlock: (input) => {
-      const ts = now()
-      const block: Block = {
-        id: nanoid(10),
-        name: input.name.trim(),
-        colour: input.colour,
-        weekday: input.weekday,
-        start: input.start,
-        end: input.end,
-        from: input.week,
-        // One-off is the default (TB-4): the rule ends at the following week (D2).
-        ...(input.carry ? {} : { until: nextWeek(input.week) }),
-        routineIds: input.routineIds ?? [],
-        createdAt: ts,
-        updatedAt: ts,
-      }
+      const block = buildBlock(input, nanoid(10), now())
       set({ blocks: [...get().blocks, block] })
       return block
     },
@@ -176,18 +131,7 @@ export const useBlocks = create<BlockState>((set, get) => {
       const name = patch.name === undefined ? version.name : patch.name.trim()
       patchBlock(version.id, (b) => ({ ...b, ...patch, name, updatedAt: now() }))
       if (patch.weekday !== undefined && patch.weekday !== version.weekday) {
-        // The slot moved; what was put in it goes along, same week, new day.
-        const weekday = patch.weekday
-        const ts = now()
-        const touched: string[] = []
-        setPlacements(
-          get().placements.map((p) => {
-            if (p.blockId !== version.id) return p
-            touched.push(p.taskId)
-            return { ...p, date: dateInWeek(weekOf(p.date), weekday), updatedAt: ts }
-          }),
-          touched,
-        )
+        applyChange(movePlacements(get().placements, version.id, patch.weekday, now()))
       }
       return version.id
     },
@@ -198,21 +142,21 @@ export const useBlocks = create<BlockState>((set, get) => {
       const until = carry ? undefined : nextWeek(week)
       if (version.until === until) return version.id
       patchBlock(version.id, ({ until: _was, ...rest }) => ({ ...rest, ...(until === undefined ? {} : { until }), updatedAt: now() }))
-      if (until !== undefined) unlink(version.id, until)
+      if (until !== undefined) applyChange(unlinkPlacements(get().placements, version.id, now(), until))
       return version.id
     },
 
     endBlock: (id, week) => {
       const block = get().blocks.find((b) => b.id === id)
       if (!block) return
-      removePlacementsOf(id, week)
+      applyChange(removePlacementsOf(get().placements, id, week))
       if (block.from >= week) get().removeBlock(id)
       else if (appliesTo(block, week)) patchBlock(id, (b) => ({ ...b, until: week, updatedAt: now() }))
     },
 
     removeBlock: (id) => {
       if (!get().blocks.some((b) => b.id === id)) return
-      unlink(id)
+      applyChange(unlinkPlacements(get().placements, id, now()))
       useTombstones.getState().bury('block', id)
       set({ blocks: get().blocks.filter((b) => b.id !== id) })
     },

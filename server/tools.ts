@@ -29,22 +29,47 @@ import {
 } from '../src/domain/routine.ts'
 import { homeSections } from '../src/domain/home.ts'
 import {
+  appliesTo,
+  BLOCK_COLOUR_NAMES,
+  blockNames,
+  blocksInWeek,
   blocksOn,
+  buildBlock,
+  carries,
   currentBlock,
+  dateInWeek,
+  DAY,
   describeMinutes,
   isTimed,
+  movePlacements,
+  nextFreeBlockColour,
+  nextWeek,
   placementsIn,
   placementsOn,
+  removePlacementsOf,
+  repointPlacements,
+  scheduledFromPlacements,
+  snap,
+  splitAt,
+  touchedTasks,
+  unlinkPlacements,
+  weekdayOf,
+  weekOf,
   type Block,
+  type BlockColourName,
   type Minutes,
   type Placement,
+  type PlacementChange,
+  type WeekKey,
 } from '../src/domain/block.ts'
+import { WEEKDAY_SHORT, WEEKDAYS_MONDAY_FIRST, type Weekday } from '../src/domain/routine.ts'
 import { toISODate } from '../src/lib/dates.ts'
 import type { Records } from './records.ts'
+import type { Row } from './db.ts'
 
 export const INSTRUCTIONS = `Brian Tasks is a single-person task manager.
-Vocabulary: a Task has a Status (todo, in-progress, hold, done), a Priority (low, normal, high, urgent), optional Tags, an optional Due date (hard deadline) and Scheduled date (the day to work on it), and lives in exactly one Space (Personal, Work, ...). A Pinned Task shows on Home. Archived Tasks are hidden everywhere but the Archive. A Routine is something done repeatedly on a schedule; it is never finished, only checked in for a day. A Block is a named, coloured span of one day on the Week page and a Placement is a Task put on a specific day, inside a Block and/or at an hour; \`today\` reports them, nothing here changes them.
-Dates are calendar dates, YYYY-MM-DD, in the user's local time. Start with \`today\` to see what matters right now. Tasks are never deleted from here: archive them instead. Spaces can be created and renamed here, never deleted.`
+Vocabulary: a Task has a Status (todo, in-progress, hold, done), a Priority (low, normal, high, urgent), optional Tags, an optional Due date (hard deadline) and Scheduled date (the day to work on it), and lives in exactly one Space (Personal, Work, ...). A Pinned Task shows on Home. Archived Tasks are hidden everywhere but the Archive. A Routine is something done repeatedly on a schedule; it is never finished, only checked in for a day. A Block is a named, coloured span of one day on the Week page (Job 09:00–17:00); a standing Block carries to every following week, a one-off Block is for its week only. Blocks can be listed, created, changed and deleted here; a change to a standing Block applies from a week on and past weeks keep what they had. A Placement is a Task put on a specific day, inside a Block and/or at an hour; \`today\` reports them, nothing here changes them.
+Dates are calendar dates, YYYY-MM-DD, in the user's local time; times are HH:MM. Start with \`today\` to see what matters right now. Tasks are never deleted from here: archive them instead. Spaces can be created and renamed here, never deleted.`
 
 const STATUS_RANK: Record<TaskStatus, number> = { todo: 0, 'in-progress': 1, hold: 2, done: 3 }
 
@@ -58,6 +83,15 @@ const tags = z.array(z.string().min(1)).describe('Free-form labels')
 const spaceRef = z.string().describe('Space name (case-insensitive) or id')
 const colourNames = Object.keys(SPACE_COLOUR_NAMES) as [SpaceColourName, ...SpaceColourName[]]
 const colour = z.enum(colourNames).describe(`Palette colour: ${colourNames.join(', ')}`)
+const blockColourNames = Object.keys(BLOCK_COLOUR_NAMES) as [BlockColourName, ...BlockColourName[]]
+const blockColour = z.enum(blockColourNames).describe(`Palette colour: ${blockColourNames.join(', ')}`)
+const clockTime = z
+  .string()
+  .regex(/^(?:[01]\d|2[0-3]):[0-5]\d$|^24:00$/, 'Expected a time of day, HH:MM')
+  .describe('Time of day, HH:MM (24h, up to 24:00); snapped to 15 minutes')
+const weekdayNames = WEEKDAYS_MONDAY_FIRST.map((d) => WEEKDAY_SHORT[d].toLowerCase()) as [string, ...string[]]
+const weekday = z.enum(weekdayNames).describe('Day of the week: mon … sun')
+const routineRefs = z.array(z.string()).describe('Routine titles (case-insensitive) or ids')
 
 type Clock = () => Date
 
@@ -79,7 +113,7 @@ export function registerTools(server: McpServer, records: Records, clock: Clock 
   const findSpace = (spaces: Space[], ref: string): Space | undefined =>
     spaces.find((s) => s.id === ref) ?? spaceNamed(spaces, ref)
 
-  const spaceView = (s: Space) => ({ id: s.id, name: s.name, colour: colourName(s.colour) })
+  const spaceView = (s: Space) => ({ id: s.id, name: s.name, colour: paletteName(SPACE_COLOUR_NAMES, s.colour) })
 
   const routineList = async (): Promise<Routine[]> => {
     const [routines, checkIns] = await Promise.all([records.routines(), records.checkIns()])
@@ -461,6 +495,263 @@ export function registerTools(server: McpServer, records: Records, clock: Clock 
       return ok(routineView(without, date))
     },
   )
+
+  // ---- Blocks -----------------------------------------------------------------------
+  // The same operations as the app's store (src/store/blocks.ts), on records instead
+  // of state: TB-5 splits, placement revisions and the Task's Scheduled (D9) come from
+  // domain/block.ts, and one call writes every touched row once.
+
+  const blockView = (routines: Routine[], week: WeekKey) => {
+    const titles = new Map(routines.map((r) => [r.id, r.title]))
+    return (b: Block) => ({
+      id: b.id,
+      name: b.name,
+      colour: paletteName(BLOCK_COLOUR_NAMES, b.colour),
+      day: WEEKDAY_SHORT[b.weekday],
+      date: dateInWeek(week, b.weekday),
+      start: describeMinutes(b.start),
+      end: describeMinutes(b.end),
+      carry: carries(b),
+      ...(b.from > week && { from: b.from }),
+      ...(!carries(b) && b.until !== nextWeek(week) && { until: b.until }),
+      routines: b.routineIds.map((id) => titles.get(id)).filter((t) => t !== undefined),
+    })
+  }
+
+  /** Routine refs to ids, or the first one that matches nothing. */
+  const routineIds = (routines: Routine[], refs: string[]): { ids: string[] } | { error: CallToolResult } => {
+    const ids: string[] = []
+    for (const ref of refs) {
+      const routine = findRoutine(routines, ref)
+      if (!routine) return { error: noRoutine(ref, routines) }
+      if (!ids.includes(routine.id)) ids.push(routine.id)
+    }
+    return { ids }
+  }
+
+  /** A span from two clock times, snapped to the grid (D5), or why it is not one. */
+  const span = (start: string, end: string): { start: Minutes; end: Minutes } | { error: CallToolResult } => {
+    const s = snap(parseMinutes(start))
+    const e = snap(parseMinutes(end))
+    if (s >= e) return { error: fail(`The Block must end after it starts (${describeMinutes(s)}–${describeMinutes(e)})`) }
+    if (e > DAY) return { error: fail('A Block lives inside one day; it cannot end after 24:00 (TB-7)') }
+    return { start: s, end: e }
+  }
+
+  /**
+   * The rows one Block change comes to. Block versions and placements are gathered
+   * by id so each is written once with its final shape (two rows for one key in one
+   * put would tie on `updatedAt`); tasks whose Scheduled moved (D9) are added last.
+   */
+  const edit = (placements: Placement[], ts: string) => {
+    const blocks = new Map<string, Block>()
+    const changed = new Set<string>()
+    const removed = new Map<string, Placement>()
+    const touched = new Set<string>()
+    const self = {
+      placements,
+      block(b: Block) {
+        blocks.set(b.id, b)
+      },
+      apply(change: PlacementChange) {
+        self.placements = change.placements
+        for (const p of change.changed) changed.add(p.id)
+        for (const p of change.removed) removed.set(p.id, p)
+        for (const id of touchedTasks(change)) touched.add(id)
+      },
+      /** Scheduled follows the earliest placement left, never cleared (TB-17, D9). */
+      rows(tasks: Task[], deletedBlocks: string[] = []): Row[] {
+        const rows: Row[] = [...blocks.values()].map((b) => live('block', b))
+        for (const id of deletedBlocks) rows.push({ kind: 'block', id, updatedAt: ts, deleted: true, data: null })
+        for (const p of self.placements) if (changed.has(p.id)) rows.push(live('placement', p))
+        for (const id of removed.keys()) rows.push({ kind: 'placement', id, updatedAt: ts, deleted: true, data: null })
+        for (const id of touched) {
+          const task = tasks.find((t) => t.id === id)
+          if (!task) continue
+          const next = scheduledFromPlacements(task, self.placements)
+          if (next !== undefined && next !== task.scheduled) rows.push(live('task', applyPatch(task, { scheduled: next }, ts)))
+        }
+        return rows
+      },
+      counts: () => ({
+        ...(changed.size > 0 && { placementsChanged: [...changed].filter((id) => !removed.has(id)).length }),
+        ...(removed.size > 0 && { placementsRemoved: removed.size }),
+      }),
+    }
+    return self
+  }
+
+  /**
+   * TB-5, D8 as the store does it: the version a change from `week` on lands in — the
+   * block itself when its rule starts in `week` or later, else the future half of a
+   * split at `week`, with placements from `week` on re-pointed to it. Undefined when
+   * the rule had already ended before `week`.
+   */
+  const versionFrom = (e: ReturnType<typeof edit>, block: Block, week: WeekKey, ts: string): Block | undefined => {
+    if (block.from >= week) return block
+    if (!appliesTo(block, week)) return undefined
+    const { past, future } = splitAt(block, week, ts, nanoid(10))
+    e.block(past)
+    e.block(future)
+    e.apply(repointPlacements(e.placements, block.id, future.id, week, ts))
+    return future
+  }
+
+  const endedBefore = (block: Block, week: WeekKey, hint: string) =>
+    fail(
+      `Block "${block.name}" (${block.id}) had already ended before the week of ${week}: it ran from ${block.from} until ${block.until}. Either ${hint}, or list_blocks a week it is in force.`,
+    )
+
+  server.registerTool(
+    'list_blocks',
+    {
+      title: 'List Blocks',
+      description:
+        'The Blocks in force in a week (this week unless told otherwise), Monday first, with their ids, colour, day, times, whether they carry to following weeks, and linked Routines. Use the ids with update_block and delete_block.',
+      inputSchema: { week: isoDate.optional().describe('Any date in the week; defaults to today') },
+      annotations: { readOnlyHint: true },
+    },
+    async ({ week: date = today() }) => {
+      const [blocks, routines] = await Promise.all([records.blocks(), routineList()])
+      const week = weekOf(date)
+      const inForce = blocksInWeek(blocks, week)
+      return ok({ week, count: inForce.length, blocks: inForce.map(blockView(routines, week)) })
+    },
+  )
+
+  server.registerTool(
+    'create_block',
+    {
+      title: 'Create Block',
+      description:
+        'Create a Block on a day: a named, coloured span of that day on the Week page. One-off (that week only) unless carry is true, which makes it standing: it carries to every following week. Blocks may overlap. The colour defaults to what other Blocks of that name use, else the first free palette colour.',
+      inputSchema: {
+        name: z.string().min(1),
+        date: isoDate.describe('The day the Block is on; a standing Block starts in that week'),
+        start: clockTime,
+        end: clockTime,
+        colour: blockColour.optional(),
+        carry: z.boolean().optional().describe('Carry to every following week (standing). Default false'),
+        routines: routineRefs.optional().describe('Routines done in this Block; they carry with it'),
+      },
+    },
+    async ({ name, date, start, end, colour: chosen, carry, routines: refs }) => {
+      const [blocks, routines] = await Promise.all([records.blocks(), routineList()])
+      const times = span(start, end)
+      if ('error' in times) return times.error
+      const linked = routineIds(routines, refs ?? [])
+      if ('error' in linked) return linked.error
+      const trimmed = name.trim()
+      const colour = chosen
+        ? BLOCK_COLOUR_NAMES[chosen]
+        : (blockNames(blocks).find((n) => n.name === trimmed)?.colour ?? nextFreeBlockColour(blocks))
+      const week = weekOf(date)
+      const block = buildBlock(
+        { name: trimmed, colour, weekday: weekdayOf(date), ...times, week, carry, routineIds: linked.ids },
+        nanoid(10),
+        now(),
+      )
+      await records.put([live('block', block)])
+      return ok(blockView(routines, week)(block))
+    },
+  )
+
+  server.registerTool(
+    'update_block',
+    {
+      title: 'Update Block',
+      description:
+        'Change a Block from a week on (this week unless told otherwise); earlier weeks keep what they had. Rename, recolour, move to another weekday (its placed Tasks move with it), change its times, turn carry on or off, or replace its linked Routines. A change to a standing Block that started earlier lands on a new version with a new id, returned here.',
+      inputSchema: {
+        id: z.string(),
+        from: isoDate.optional().describe('Any date in the first week the change applies to; defaults to today'),
+        name: z.string().min(1).optional(),
+        colour: blockColour.optional(),
+        weekday: weekday.optional(),
+        start: clockTime.optional(),
+        end: clockTime.optional(),
+        carry: z.boolean().optional().describe('On: carries to every following week. Off: this is its last week'),
+        routines: routineRefs.optional().describe('Replaces the whole list'),
+      },
+      annotations: { destructiveHint: false, idempotentHint: true },
+    },
+    async (args) => {
+      const [blocks, placements, tasks, routines] = await Promise.all([
+        records.blocks(),
+        records.placements(),
+        records.tasks(),
+        routineList(),
+      ])
+      const block = blocks.find((b) => b.id === args.id)
+      if (!block) return fail(`No Block with id ${args.id}`)
+      const linked = args.routines === undefined ? undefined : routineIds(routines, args.routines)
+      if (linked && 'error' in linked) return linked.error
+      const week = weekOf(args.from ?? today())
+      const ts = now()
+      const e = edit(placements, ts)
+      const version = versionFrom(e, block, week, ts)
+      if (!version) return endedBefore(block, week, 'pass a from date in a week it is in force')
+
+      const times = span(args.start ?? describeMinutes(version.start), args.end ?? describeMinutes(version.end))
+      if ('error' in times) return times.error
+      const wanted = args.weekday === undefined ? version.weekday : weekdayFromName(args.weekday)
+      const { until: _was, ...rest } = version
+      const until = args.carry === undefined ? version.until : args.carry ? undefined : nextWeek(week)
+      const next: Block = {
+        ...rest,
+        ...(args.name !== undefined && { name: args.name.trim() }),
+        ...(args.colour !== undefined && { colour: BLOCK_COLOUR_NAMES[args.colour] }),
+        weekday: wanted,
+        ...times,
+        ...(until === undefined ? {} : { until }),
+        ...(linked && { routineIds: linked.ids }),
+        updatedAt: ts,
+      }
+      e.block(next)
+      if (wanted !== version.weekday) e.apply(movePlacements(e.placements, version.id, wanted, ts))
+      // Carry turned off: what was in the Block in the weeks it no longer covers is unlinked.
+      if (until !== undefined && until !== version.until) e.apply(unlinkPlacements(e.placements, version.id, ts, until))
+      await records.put(e.rows(tasks))
+      return ok({ ...blockView(routines, week)(next), ...e.counts() })
+    },
+  )
+
+  server.registerTool(
+    'delete_block',
+    {
+      title: 'Delete Block',
+      description:
+        'Remove a Block from a week on (this week unless told otherwise): it stops there, its placed Tasks from then on are removed, and earlier weeks keep it. A Block that starts in or after that week is deleted outright. Pass everywhere: true to delete the Block from past weeks too; then Tasks placed in it keep their hour if they had one and are otherwise removed.',
+      inputSchema: {
+        id: z.string(),
+        from: isoDate.optional().describe('Any date in the first week the Block should be gone from; defaults to today'),
+        everywhere: z.boolean().optional().describe('Delete outright, past weeks included'),
+      },
+      annotations: { destructiveHint: true },
+    },
+    async ({ id, from, everywhere }) => {
+      const [blocks, placements, tasks] = await Promise.all([records.blocks(), records.placements(), records.tasks()])
+      const block = blocks.find((b) => b.id === id)
+      if (!block) return fail(`No Block with id ${id}`)
+      const ts = now()
+      const e = edit(placements, ts)
+      if (everywhere) {
+        e.apply(unlinkPlacements(e.placements, id, ts))
+        await records.put(e.rows(tasks, [id]))
+        return ok({ id, name: block.name, deleted: true, ...e.counts() })
+      }
+      const week = weekOf(from ?? today())
+      if (block.from < week && !appliesTo(block, week)) return endedBefore(block, week, 'pass everywhere: true to delete it from past weeks too')
+      e.apply(removePlacementsOf(e.placements, id, week))
+      if (block.from >= week) {
+        await records.put(e.rows(tasks, [id]))
+        return ok({ id, name: block.name, deleted: true, ...e.counts() })
+      }
+      e.block({ ...block, until: week, updatedAt: ts })
+      await records.put(e.rows(tasks))
+      return ok({ id, name: block.name, removedFrom: week, ...e.counts() })
+    },
+  )
 }
 
 // ---- Helpers ---------------------------------------------------------------------
@@ -479,8 +770,27 @@ function localDate(date: ISODate): Date {
 }
 
 /** The palette name for a hex colour, or the hex itself if it is off-palette. */
-const colourName = (hex: string): string =>
-  Object.entries(SPACE_COLOUR_NAMES).find(([, value]) => value === hex)?.[0] ?? hex
+const paletteName = (palette: Record<string, string>, hex: string): string =>
+  Object.entries(palette).find(([, value]) => value === hex)?.[0] ?? hex
+
+/** "17:30" → 1050. The schema has checked the shape. */
+const parseMinutes = (time: string): Minutes => {
+  const [h, m] = time.split(':').map(Number)
+  return h * 60 + m
+}
+
+/** "mon" … "sun" → the date-fns weekday number the domain uses. */
+const weekdayFromName = (name: string): Weekday =>
+  WEEKDAYS_MONDAY_FIRST[WEEKDAYS_MONDAY_FIRST.findIndex((d) => WEEKDAY_SHORT[d].toLowerCase() === name)]
+
+/** A live row for a record, stamped with its own `updatedAt`. */
+const live = (kind: string, data: { id: string; updatedAt: string }): Row => ({
+  kind,
+  id: data.id,
+  updatedAt: data.updatedAt,
+  deleted: false,
+  data,
+})
 
 const ok = (data: unknown): CallToolResult => ({ content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] })
 
